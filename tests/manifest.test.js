@@ -15,10 +15,23 @@ test("all manifest entry points exist", () => {
   const entryPoints = [
     manifest.action.default_popup,
     manifest.background.service_worker,
-    ...manifest.content_scripts.flatMap(({ js }) => js)
+    ...manifest.content_scripts.flatMap(({ js, css = [] }) => [...js, ...css])
   ];
 
   for (const entryPoint of entryPoints) {
     assert.equal(fs.existsSync(path.join(root, entryPoint)), true, `${entryPoint} should exist`);
   }
+});
+
+test("uses one full-copy action without a result tab page", () => {
+  const popup = fs.readFileSync(path.join(root, manifest.action.default_popup), "utf8");
+  const background = fs.readFileSync(
+    path.join(root, manifest.background.service_worker),
+    "utf8"
+  );
+
+  assert.equal((popup.match(/data-copy-mode=/g) || []).length, 1);
+  assert.match(popup, /data-copy-mode="full"/);
+  assert.doesNotMatch(background, /src\/result\/result\.html/);
+  assert.doesNotMatch(background, /active:\s*true/);
 });

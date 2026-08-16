@@ -1,4 +1,4 @@
-# LinkedIn Profile Copy
+# LinkedIn Profile Copier
 
 A small Chrome extension for copying LinkedIn profile details as clean text.
 
@@ -14,16 +14,16 @@ A small Chrome extension for copying LinkedIn profile details as clean text.
 
 1. Open a LinkedIn profile at `linkedin.com/in/...`.
 2. Click the extension icon.
-3. Choose **Simple copy** or **Full copy**.
-4. Use **Copy all** in the result tab.
+3. Click **Copy full profile**.
+4. Use **Copy all** in the panel that appears on the LinkedIn profile.
 
-Simple copy reads the details already loaded on the open profile page. Full copy visits each enabled profile detail page in a background tab, one at a time, so it can include entries hidden behind “Show all.” It uses short, varied pauses between page loads and reads, and background tabs close automatically.
+The active LinkedIn profile stays selected and no separate result tab or window is opened. To include entries hidden behind “Show all,” the extension checks each enabled profile detail page in a temporary inactive tab, one at a time. It uses short, varied pauses between page loads and reads, and every temporary tab closes automatically.
 
 The popup's **Settings** tab controls which sections are included. Markdown formatting is optional and off by default.
 
 ## Privacy
 
-Profile data is processed locally and kept only for the lifetime of its result tab. The extension does not send profile data to an external service.
+Profile data is processed locally and kept only while the in-page copy panel is open. The extension does not send profile data to an external service.
 
 This project is not affiliated with or endorsed by LinkedIn.
 

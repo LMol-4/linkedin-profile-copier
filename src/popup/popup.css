@@ -222,16 +222,6 @@ main {
   background: #095aaa;
 }
 
-.action-button.secondary {
-  border: 1px solid #c7d8e8;
-  color: #0a5aaa;
-  background: #f3f8fc;
-}
-
-.action-button.secondary:hover {
-  background: #eaf3fa;
-}
-
 .action-button:disabled {
   cursor: wait;
   opacity: 0.55;

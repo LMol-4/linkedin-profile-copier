@@ -38,6 +38,9 @@
     /^select language$/i,
     /^linkedin corporation ©\s*\d{4}$/i
   ];
+  const startedCaptureJobs = new Set();
+  const dismissedCaptureJobs = new Set();
+  let capturePanelState = null;
 
   function elementText(element) {
     return element ? element.innerText || element.textContent || "" : "";
@@ -200,6 +203,147 @@
     return cleanSectionText(elementText(detailList || primaryRoot), key);
   }
 
+  function removeCapturePanel() {
+    if (!capturePanelState) {
+      return;
+    }
+
+    const { job } = capturePanelState;
+    capturePanelState.element.remove();
+    capturePanelState = null;
+
+    if (["complete", "failed"].includes(job.status)) {
+      chrome.runtime.sendMessage({
+        type: "CLEAR_CAPTURE_JOB",
+        jobId: job.id
+      }).catch(() => undefined);
+    } else {
+      dismissedCaptureJobs.add(job.id);
+    }
+  }
+
+  async function copyCaptureOutput() {
+    const textarea = capturePanelState?.element.querySelector("[data-lpc-output]");
+    const button = capturePanelState?.element.querySelector("[data-lpc-copy]");
+    if (!textarea || !button) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(textarea.value);
+    } catch {
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+    }
+
+    button.textContent = "Copied";
+    window.setTimeout(() => {
+      if (button.isConnected) {
+        button.textContent = "Copy all";
+      }
+    }, 1600);
+  }
+
+  function createCapturePanel(job) {
+    capturePanelState?.element.remove();
+
+    const panel = document.createElement("aside");
+    panel.className = "lpc-panel";
+    panel.setAttribute("aria-live", "polite");
+    panel.innerHTML = `
+      <header class="lpc-header">
+        <div>
+          <span class="lpc-eyebrow">LinkedIn Profile Copier</span>
+          <strong data-lpc-title>Full profile copy</strong>
+        </div>
+        <button class="lpc-close" type="button" aria-label="Close profile copier">×</button>
+      </header>
+      <div class="lpc-body">
+        <div class="lpc-loading" data-lpc-loading>
+          <span class="lpc-spinner" aria-hidden="true"></span>
+          <div>
+            <strong data-lpc-status>Preparing full profile…</strong>
+            <p data-lpc-detail>Keep this profile tab open.</p>
+          </div>
+        </div>
+        <div class="lpc-result" data-lpc-result hidden>
+          <textarea data-lpc-output spellcheck="false" aria-label="Copied LinkedIn profile text"></textarea>
+          <p class="lpc-warning" data-lpc-warning hidden></p>
+          <button class="lpc-copy" data-lpc-copy type="button">Copy all</button>
+        </div>
+      </div>
+    `;
+
+    panel.querySelector(".lpc-close").addEventListener("click", removeCapturePanel);
+    panel.querySelector("[data-lpc-copy]").addEventListener("click", copyCaptureOutput);
+    document.body.appendChild(panel);
+    capturePanelState = { element: panel, job };
+    return panel;
+  }
+
+  function renderCaptureJob(job) {
+    const panel = capturePanelState?.job.id === job.id
+      ? capturePanelState.element
+      : createCapturePanel(job);
+    capturePanelState.job = job;
+
+    const title = panel.querySelector("[data-lpc-title]");
+    const loading = panel.querySelector("[data-lpc-loading]");
+    const status = panel.querySelector("[data-lpc-status]");
+    const detail = panel.querySelector("[data-lpc-detail]");
+    const result = panel.querySelector("[data-lpc-result]");
+    const output = panel.querySelector("[data-lpc-output]");
+    const warning = panel.querySelector("[data-lpc-warning]");
+
+    if (job.status === "complete") {
+      title.textContent = job.profile?.header?.name || "Profile ready";
+      output.value = ProfileCopyFormatter.formatProfile(job.profile, job.settings);
+      loading.hidden = true;
+      result.hidden = false;
+
+      if (job.warnings?.length) {
+        warning.textContent = `Used the visible profile version for: ${job.warnings.join(", ")}.`;
+        warning.hidden = false;
+      } else {
+        warning.hidden = true;
+      }
+      return;
+    }
+
+    if (job.status === "failed") {
+      title.textContent = "Copy failed";
+      status.textContent = job.error || "The profile could not be copied.";
+      detail.textContent = "Close this panel and try again from the extension.";
+      panel.classList.add("lpc-is-error");
+      loading.hidden = false;
+      result.hidden = true;
+      return;
+    }
+
+    panel.classList.remove("lpc-is-error");
+    title.textContent = "Full profile copy";
+    status.textContent = job.statusText || "Reading profile…";
+    detail.textContent = job.progress
+      ? `Section ${job.progress.current} of ${job.progress.total}. Temporary tabs close automatically.`
+      : "Keep this profile tab open.";
+    loading.hidden = false;
+    result.hidden = true;
+  }
+
+  function showCapturePanel(job) {
+    dismissedCaptureJobs.delete(job.id);
+    renderCaptureJob(job);
+
+    if (job.status === "ready" && !startedCaptureJobs.has(job.id)) {
+      startedCaptureJobs.add(job.id);
+      window.setTimeout(() => {
+        chrome.runtime.sendMessage({ type: "RUN_CAPTURE", jobId: job.id })
+          .catch(() => startedCaptureJobs.delete(job.id));
+      }, 0);
+    }
+  }
+
   function handleMessage(request, _sender, sendResponse) {
     if (request?.type === "EXTRACT_BASE_PROFILE") {
       sendResponse({ ok: true, profile: extractBaseProfile(request.settings) });
@@ -208,6 +352,29 @@
 
     if (request?.type === "EXTRACT_DETAIL_SECTION") {
       sendResponse({ ok: true, text: extractDetailSection(request.sectionKey) });
+      return;
+    }
+
+    if (request?.type === "SHOW_CAPTURE_PANEL") {
+      showCapturePanel(request.job);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (request?.type === "CAPTURE_JOB_UPDATED") {
+      if (capturePanelState?.job.id === request.job.id) {
+        renderCaptureJob(request.job);
+      } else if (
+        dismissedCaptureJobs.has(request.job.id)
+        && ["complete", "failed"].includes(request.job.status)
+      ) {
+        dismissedCaptureJobs.delete(request.job.id);
+        chrome.runtime.sendMessage({
+          type: "CLEAR_CAPTURE_JOB",
+          jobId: request.job.id
+        }).catch(() => undefined);
+      }
+      sendResponse({ ok: true });
     }
   }
 

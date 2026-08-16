@@ -68,20 +68,18 @@ async function persistSettings() {
   showSaved();
 }
 
-function setBusy(busy, mode) {
+function setBusy(busy) {
   for (const button of actionButtons) {
     button.disabled = busy;
-    button.textContent = busy && button.dataset.copyMode === mode
-      ? "Opening…"
-      : `${button.dataset.copyMode === "full" ? "Full" : "Simple"} copy`;
+    button.textContent = busy ? "Starting…" : "Copy full profile";
   }
 }
 
-async function startCopy(mode) {
+async function startCopy() {
   await settingsReady;
   popupStatus.classList.remove("is-error");
-  popupStatus.textContent = mode === "full" ? "Preparing a full copy…" : "Reading this profile…";
-  setBusy(true, mode);
+  popupStatus.textContent = "Opening the copy panel on LinkedIn…";
+  setBusy(true);
 
   try {
     if (!globalThis.chrome?.runtime) {
@@ -92,17 +90,18 @@ async function startCopy(mode) {
     const response = await chrome.runtime.sendMessage({
       type: "CREATE_CAPTURE_JOB",
       sourceTabId: activeTab?.id,
-      mode,
       settings
     });
 
     if (!response?.ok) {
       throw new Error(response?.error || "The copy could not be started.");
     }
+
+    window.close();
   } catch (error) {
     popupStatus.textContent = error.message || "Open a LinkedIn profile and try again.";
     popupStatus.classList.add("is-error");
-    setBusy(false, mode);
+    setBusy(false);
   }
 }
 
@@ -111,7 +110,7 @@ tabButtons.forEach((button) => {
 });
 
 actionButtons.forEach((button) => {
-  button.addEventListener("click", () => startCopy(button.dataset.copyMode));
+  button.addEventListener("click", startCopy);
 });
 
 sectionSettings.addEventListener("change", (event) => {

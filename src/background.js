@@ -67,6 +67,10 @@ async function patchJob(jobId, patch) {
 
   const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
   await setJob(jobId, next);
+  await chrome.tabs.sendMessage(next.sourceTabId, {
+    type: "CAPTURE_JOB_UPDATED",
+    job: next
+  }).catch(() => undefined);
   return next;
 }
 
@@ -76,14 +80,28 @@ async function createCaptureJob(request) {
     throw new Error("Open a LinkedIn profile before starting a copy.");
   }
 
-  const mode = request.mode === "full" ? "full" : "simple";
+  const storedJobs = await chrome.storage.session.get(null);
+  const activeJob = Object.entries(storedJobs).find(([key, value]) => (
+    key.startsWith(JOB_PREFIX)
+    && value?.sourceTabId === sourceTab.id
+    && ["ready", "running"].includes(value.status)
+  ));
+
+  if (activeJob) {
+    await sendToProfileTab(sourceTab.id, {
+      type: "SHOW_CAPTURE_PANEL",
+      job: activeJob[1]
+    });
+    return { ok: true, jobId: activeJob[1].id, alreadyRunning: true };
+  }
+
   const settings = ProfileCopyConfig.normaliseSettings(request.settings);
   const jobId = crypto.randomUUID();
   const job = {
     id: jobId,
     status: "ready",
-    statusText: mode === "full" ? "Preparing full profile…" : "Reading visible profile…",
-    mode,
+    statusText: "Preparing full profile…",
+    mode: "full",
     settings,
     sourceTabId: sourceTab.id,
     sourceUrl: sourceTab.url,
@@ -92,14 +110,9 @@ async function createCaptureJob(request) {
   };
 
   await setJob(jobId, job);
-  const resultTab = await chrome.tabs.create({
-    active: false,
-    url: "about:blank"
-  });
-  await patchJob(jobId, { resultTabId: resultTab.id });
-  await chrome.tabs.update(resultTab.id, {
-    active: true,
-    url: chrome.runtime.getURL(`src/result/result.html?job=${encodeURIComponent(jobId)}`)
+  await sendToProfileTab(sourceTab.id, {
+    type: "SHOW_CAPTURE_PANEL",
+    job
   });
 
   return { ok: true, jobId };
@@ -133,9 +146,17 @@ async function sendToProfileTab(tabId, message) {
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch {
+    await chrome.scripting.insertCSS({
+      target: { tabId },
+      files: ["src/content/profileOverlay.css"]
+    });
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["src/content/profileExtractor.js"]
+      files: [
+        "src/shared/config.js",
+        "src/shared/formatter.js",
+        "src/content/profileExtractor.js"
+      ]
     });
     return chrome.tabs.sendMessage(tabId, message);
   }
@@ -214,29 +235,27 @@ async function runCapture(jobId) {
     profile.mode = job.mode;
     const warnings = [];
 
-    if (job.mode === "full") {
-      const detailSections = Object.keys(DETAIL_PATHS).filter(
-        (key) => job.settings.sections[key]
-      );
+    const detailSections = Object.keys(DETAIL_PATHS).filter(
+      (key) => job.settings.sections[key]
+    );
 
-      for (let index = 0; index < detailSections.length; index += 1) {
-        const sectionKey = detailSections[index];
-        try {
-          const detailText = await collectDetailSection(
-            jobId,
-            job,
-            sectionKey,
-            index,
-            detailSections.length
-          );
+    for (let index = 0; index < detailSections.length; index += 1) {
+      const sectionKey = detailSections[index];
+      try {
+        const detailText = await collectDetailSection(
+          jobId,
+          job,
+          sectionKey,
+          index,
+          detailSections.length
+        );
 
-          if (shouldUseDetail(profile.sections[sectionKey], detailText)) {
-            profile.sections[sectionKey] = detailText;
-          }
-        } catch {
-          const label = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey)?.label;
-          warnings.push(label || sectionKey);
+        if (shouldUseDetail(profile.sections[sectionKey], detailText)) {
+          profile.sections[sectionKey] = detailText;
         }
+      } catch {
+        const label = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey)?.label;
+        warnings.push(label || sectionKey);
       }
     }
 
@@ -275,16 +294,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true;
   }
 
-  return false;
-});
-
-chrome.tabs.onRemoved.addListener(async (tabId) => {
-  const stored = await chrome.storage.session.get(null);
-  const keysToRemove = Object.entries(stored)
-    .filter(([key, value]) => key.startsWith(JOB_PREFIX) && value?.resultTabId === tabId)
-    .map(([key]) => key);
-
-  if (keysToRemove.length) {
-    await chrome.storage.session.remove(keysToRemove);
+  if (request?.type === "CLEAR_CAPTURE_JOB") {
+    chrome.storage.session.remove(jobKey(request.jobId))
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
   }
+
+  return false;
 });

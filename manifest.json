@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "LinkedIn Profile Copy",
-  "version": "0.1.0",
-  "description": "Copy the useful parts of a LinkedIn profile as clean text.",
+  "name": "LinkedIn Profile Copier",
+  "version": "0.2.0",
+  "description": "Copy a complete LinkedIn profile as clean text without leaving the profile tab.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -13,7 +13,7 @@
     "https://*.linkedin.com/*"
   ],
   "action": {
-    "default_title": "LinkedIn Profile Copy",
+    "default_title": "LinkedIn Profile Copier",
     "default_popup": "src/popup/popup.html"
   },
   "background": {
@@ -25,7 +25,12 @@
         "https://*.linkedin.com/in/*"
       ],
       "js": [
+        "src/shared/config.js",
+        "src/shared/formatter.js",
         "src/content/profileExtractor.js"
+      ],
+      "css": [
+        "src/content/profileOverlay.css"
       ],
       "run_at": "document_idle"
     }

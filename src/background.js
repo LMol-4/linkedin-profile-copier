@@ -9,6 +9,11 @@ const DETAIL_PATHS = {
   projects: "projects",
   languages: "languages"
 };
+const CAPTURE_DELAYS = Object.freeze({
+  beforeInitialRead: { minimum: 450, maximum: 900 },
+  betweenDetailPages: { minimum: 900, maximum: 1800 },
+  afterDetailLoad: { minimum: 1500, maximum: 2900 }
+});
 
 function jobKey(jobId) {
   return `${JOB_PREFIX}${jobId}`;
@@ -38,6 +43,10 @@ function randomBetween(minimum, maximum) {
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function pauseWithin({ minimum, maximum }) {
+  return sleep(randomBetween(minimum, maximum));
 }
 
 async function getJob(jobId) {
@@ -149,14 +158,14 @@ async function collectDetailSection(jobId, job, sectionKey, index, total) {
     progress: { current: index + 1, total }
   });
 
-  await sleep(randomBetween(650, 1300));
+  await pauseWithin(CAPTURE_DELAYS.betweenDetailPages);
   const detailUrl = `${profileRoot(job.sourceUrl)}/details/${DETAIL_PATHS[sectionKey]}/`;
   let detailTab;
 
   try {
     detailTab = await chrome.tabs.create({ active: false, url: detailUrl });
     await waitForTab(detailTab.id);
-    await sleep(randomBetween(800, 1650));
+    await pauseWithin(CAPTURE_DELAYS.afterDetailLoad);
     const response = await sendToProfileTab(detailTab.id, {
       type: "EXTRACT_DETAIL_SECTION",
       sectionKey
@@ -191,6 +200,7 @@ async function runCapture(jobId) {
   await patchJob(jobId, { status: "running", statusText: "Reading visible profile…" });
 
   try {
+    await pauseWithin(CAPTURE_DELAYS.beforeInitialRead);
     const baseResponse = await sendToProfileTab(job.sourceTabId, {
       type: "EXTRACT_BASE_PROFILE",
       settings: job.settings

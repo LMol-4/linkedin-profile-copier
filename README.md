@@ -17,7 +17,7 @@ A small Chrome extension for copying LinkedIn profile details as clean text.
 3. Choose **Simple copy** or **Full copy**.
 4. Use **Copy all** in the result tab.
 
-Simple copy reads the details already loaded on the open profile page. Full copy visits each enabled profile detail page in a background tab, one at a time, so it can include entries hidden behind “Show all.” Background tabs close automatically.
+Simple copy reads the details already loaded on the open profile page. Full copy visits each enabled profile detail page in a background tab, one at a time, so it can include entries hidden behind “Show all.” It uses short, varied pauses between page loads and reads, and background tabs close automatically.
 
 The popup's **Settings** tab controls which sections are included. Markdown formatting is optional and off by default.
 

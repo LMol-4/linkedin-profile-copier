@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LinkedIn Profile Copy</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <div class="popup-shell">
+      <header class="brand-row">
+        <div class="brand-mark" aria-hidden="true">L</div>
+        <div>
+          <h1>Profile Copy</h1>
+          <p>Clean LinkedIn profile text</p>
+        </div>
+      </header>
+
+      <nav class="tab-list" role="tablist" aria-label="Extension sections">
+        <button
+          class="tab-button is-active"
+          id="copy-tab"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="copy-panel"
+          data-panel="copy-panel"
+        >Copy</button>
+        <button
+          class="tab-button"
+          id="settings-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="settings-panel"
+          data-panel="settings-panel"
+        >Settings</button>
+      </nav>
+
+      <main>
+        <section class="tab-panel" id="copy-panel" role="tabpanel" aria-labelledby="copy-tab">
+          <div class="intro-copy">
+            <h2>Copy this profile</h2>
+            <p>Choose how much LinkedIn should load.</p>
+          </div>
+
+          <div class="copy-option">
+            <div class="option-heading">
+              <div>
+                <strong>Simple copy</strong>
+                <span>Fastest</span>
+              </div>
+              <span class="tooltip-wrap">
+                <button class="info-button" type="button" aria-label="About simple copy">?</button>
+                <span class="tooltip" role="tooltip">Copies only what is currently loaded on the open profile. It does not open any other LinkedIn pages.</span>
+              </span>
+            </div>
+            <p>Use the details already visible on the profile page.</p>
+            <button class="action-button primary" type="button" data-copy-mode="simple">Simple copy</button>
+          </div>
+
+          <div class="copy-option">
+            <div class="option-heading">
+              <div>
+                <strong>Full copy</strong>
+                <span>Most complete</span>
+              </div>
+              <span class="tooltip-wrap">
+                <button class="info-button" type="button" aria-label="About full copy">?</button>
+                <span class="tooltip tooltip-left" role="tooltip">Opens each enabled profile detail page in a background tab, one at a time, to include entries hidden behind “Show all.” It takes a little longer.</span>
+              </span>
+            </div>
+            <p>Load complete versions of the enabled sections.</p>
+            <button class="action-button secondary" type="button" data-copy-mode="full">Full copy</button>
+          </div>
+
+          <p class="popup-status" id="popup-status" aria-live="polite"></p>
+        </section>
+
+        <section class="tab-panel" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab" hidden>
+          <div class="intro-copy">
+            <h2>Copy settings</h2>
+            <p>Choose what is included every time.</p>
+          </div>
+
+          <div class="settings-list" id="section-settings"></div>
+
+          <div class="format-setting">
+            <div>
+              <strong>Markdown formatting</strong>
+              <span>Add # headings for Markdown apps</span>
+            </div>
+            <label class="switch">
+              <input id="markdown-setting" type="checkbox" aria-label="Use Markdown formatting">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <p class="saved-status" id="saved-status" aria-live="polite"></p>
+        </section>
+      </main>
+
+      <footer>
+        Built by <a href="https://github.com/LMol-4" target="_blank" rel="noreferrer">Luke</a>
+      </footer>
+    </div>
+
+    <script src="../shared/config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

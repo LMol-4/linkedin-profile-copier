@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LinkedIn Profile Copy</title>
+    <link rel="stylesheet" href="result.css">
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">LinkedIn Profile Copy</p>
+          <h1 id="page-title">Preparing profile</h1>
+        </div>
+        <span class="mode-badge" id="mode-badge">Copy</span>
+      </header>
+
+      <section class="status-card" id="status-card" aria-live="polite">
+        <span class="spinner" id="spinner" aria-hidden="true"></span>
+        <div>
+          <strong id="status-title">Reading profile…</strong>
+          <p id="status-detail">Keep this tab open for a moment.</p>
+        </div>
+      </section>
+
+      <section class="output-card" id="output-card" hidden>
+        <div class="output-heading">
+          <div>
+            <h2>Profile text</h2>
+            <p id="capture-meta"></p>
+          </div>
+          <button class="copy-button" id="copy-button" type="button">Copy all</button>
+        </div>
+        <textarea id="profile-output" spellcheck="false" aria-label="Copied LinkedIn profile text"></textarea>
+        <p class="warning" id="warning" hidden></p>
+      </section>
+    </main>
+
+    <script src="../shared/config.js"></script>
+    <script src="../shared/formatter.js"></script>
+    <script src="result.js"></script>
+  </body>
+</html>

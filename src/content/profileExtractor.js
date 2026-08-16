@@ -30,6 +30,14 @@
     /^profile photo$/i,
     /^graphic$/i
   ];
+  const sectionBoundaryPatterns = [
+    /^more profiles for you$/i,
+    /^people also viewed$/i,
+    /^people you may know$/i,
+    /^recommended for you$/i,
+    /^select language$/i,
+    /^linkedin corporation ©\s*\d{4}$/i
+  ];
 
   function elementText(element) {
     return element ? element.innerText || element.textContent || "" : "";
@@ -68,18 +76,24 @@
 
     for (const id of meta.ids) {
       const anchor = document.getElementById(id);
-      const section = anchor?.closest("section") || anchor?.parentElement?.closest("section");
+      const section = anchor?.closest("section, .artdeco-card")
+        || anchor?.parentElement?.closest("section, .artdeco-card");
       if (section) {
         return section;
       }
     }
 
-    const candidates = document.querySelectorAll("main section, [role='main'] section");
-    for (const section of candidates) {
-      const heading = section.querySelector("h1, h2, h3, .pvs-header__title");
+    const primaryRoot = document.querySelector(".scaffold-layout__main")
+      || document.querySelector("main, [role='main']")
+      || document.body;
+    const headings = primaryRoot.querySelectorAll(
+      "h1, h2, h3, [role='heading'], .pvs-header__title"
+    );
+
+    for (const heading of headings) {
       const headingText = normaliseLine(elementText(heading)).toLowerCase();
       if (meta.headings.some((value) => headingText === value || headingText.startsWith(`${value} `))) {
-        return section;
+        return heading.closest("section, .artdeco-card") || heading.parentElement;
       }
     }
 
@@ -88,7 +102,18 @@
 
   function cleanSectionText(value, key) {
     const headings = sectionMeta[key]?.headings || [];
-    const lines = cleanLines(value).filter((line) => {
+    const cleanedLines = cleanLines(value);
+    const boundaryIndex = cleanedLines.findIndex((line, index) => {
+      if (sectionBoundaryPatterns.some((pattern) => pattern.test(line))) {
+        return true;
+      }
+
+      return /^about$/i.test(line) && /^accessibility$/i.test(cleanedLines[index + 1] || "");
+    });
+    const boundedLines = boundaryIndex >= 0
+      ? cleanedLines.slice(0, boundaryIndex)
+      : cleanedLines;
+    const lines = boundedLines.filter((line) => {
       const lower = line.toLowerCase();
       return !headings.includes(lower) && !headings.some((heading) => lower === `${heading} section`);
     });
@@ -97,7 +122,9 @@
   }
 
   function extractHeader() {
-    const main = document.querySelector("main, [role='main']") || document.body;
+    const main = document.querySelector(".scaffold-layout__main")
+      || document.querySelector("main, [role='main']")
+      || document.body;
     const nameElement = main.querySelector("h1");
     const card = nameElement?.closest("section") || main.querySelector("section") || main;
     const name = normaliseLine(elementText(nameElement));
@@ -111,13 +138,25 @@
 
     let headline = normaliseLine(elementText(headlineElement));
     let location = normaliseLine(elementText(locationElement));
+    const isConnectionDegree = (line) => /^[•·]?\s*(1st|2nd|3rd)(?:\s+degree connection)?$/i.test(line);
+
+    if (isConnectionDegree(headline)) {
+      headline = "";
+    }
+
+    if (isConnectionDegree(location)) {
+      location = "";
+    }
 
     if (!headline || !location) {
       const cardLines = cleanLines(elementText(card));
       const nameIndex = cardLines.indexOf(name);
       const details = cardLines
         .slice(nameIndex >= 0 ? nameIndex + 1 : 0)
-        .filter((line) => !/^(contact info|connections?|followers?|message|connect|follow|more)$/i.test(line));
+        .filter((line) => (
+          !isConnectionDegree(line)
+          && !/^(contact info|connections?|followers?|message|connect|follow|more)$/i.test(line)
+        ));
 
       headline ||= details[0] || "";
       location ||= details.find((line) => line !== headline && !/\d[\d,.]*\+?\s+(connections?|followers?)/i.test(line)) || "";
@@ -153,8 +192,12 @@
       return cleanSectionText(elementText(section), key);
     }
 
-    const main = document.querySelector("main, [role='main']");
-    return cleanSectionText(elementText(main), key);
+    const primaryRoot = document.querySelector(".scaffold-layout__main")
+      || document.querySelector("main, [role='main']");
+    const detailList = primaryRoot?.querySelector(
+      ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
+    );
+    return cleanSectionText(elementText(detailList || primaryRoot), key);
   }
 
   function handleMessage(request, _sender, sendResponse) {

@@ -8,6 +8,10 @@ const savedStatus = document.getElementById("saved-status");
 let settings = ProfileCopyConfig.normaliseSettings();
 let savedStatusTimer;
 
+actionButtons.forEach((button) => {
+  button.disabled = true;
+});
+
 function selectTab(selectedButton) {
   for (const button of tabButtons) {
     const selected = button === selectedButton;
@@ -74,6 +78,7 @@ function setBusy(busy, mode) {
 }
 
 async function startCopy(mode) {
+  await settingsReady;
   popupStatus.classList.remove("is-error");
   popupStatus.textContent = mode === "full" ? "Preparing a full copy…" : "Reading this profile…";
   setBusy(true, mode);
@@ -124,11 +129,20 @@ markdownSetting.addEventListener("change", () => {
   persistSettings();
 });
 
-if (globalThis.chrome?.storage?.sync) {
-  chrome.storage.sync.get(["sections", "markdown"]).then((stored) => {
-    settings = ProfileCopyConfig.normaliseSettings(stored);
-    renderSettings();
-  });
-} else {
+async function loadSettings() {
+  if (globalThis.chrome?.storage?.sync) {
+    try {
+      const stored = await chrome.storage.sync.get(["sections", "markdown"]);
+      settings = ProfileCopyConfig.normaliseSettings(stored);
+    } catch {
+      settings = ProfileCopyConfig.normaliseSettings();
+    }
+  }
+
   renderSettings();
+  actionButtons.forEach((button) => {
+    button.disabled = false;
+  });
 }
+
+const settingsReady = loadSettings();

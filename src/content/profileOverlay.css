@@ -140,8 +140,17 @@
   box-shadow: 0 0 0 3px rgba(10, 102, 194, 0.14);
 }
 
+.lpc-auto-copy,
 .lpc-warning {
   margin-top: 9px;
+}
+
+.lpc-auto-copy {
+  color: #257a42;
+}
+
+.lpc-auto-copy.lpc-is-warning,
+.lpc-warning {
   color: #7b5a18;
 }
 

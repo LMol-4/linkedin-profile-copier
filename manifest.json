@@ -5,6 +5,8 @@
   "description": "Copy a complete LinkedIn profile as clean text without leaving the profile tab.",
   "permissions": [
     "activeTab",
+    "clipboardWrite",
+    "offscreen",
     "scripting",
     "storage",
     "tabs"

@@ -12,7 +12,8 @@
 
   const defaultSettings = {
     sections: Object.fromEntries(sections.map(({ key }) => [key, true])),
-    markdown: false
+    markdown: false,
+    autoCopy: false
   };
 
   function normaliseSettings(value = {}) {
@@ -21,7 +22,8 @@
         ...defaultSettings.sections,
         ...(value.sections || {})
       },
-      markdown: Boolean(value.markdown)
+      markdown: Boolean(value.markdown),
+      autoCopy: Boolean(value.autoCopy)
     };
   }
 

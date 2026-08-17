@@ -1,6 +1,7 @@
-importScripts("shared/config.js");
+importScripts("shared/config.js", "shared/formatter.js");
 
 const JOB_PREFIX = "profile-copy-job:";
+const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/offscreen.html";
 const DETAIL_PATHS = {
   experience: "experience",
   education: "education",
@@ -14,6 +15,53 @@ const CAPTURE_DELAYS = Object.freeze({
   betweenDetailPages: { minimum: 900, maximum: 1800 },
   afterDetailLoad: { minimum: 1500, maximum: 2900 }
 });
+let creatingOffscreenDocument;
+
+async function hasOffscreenDocument() {
+  const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
+
+  if (chrome.runtime.getContexts) {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [offscreenUrl]
+    });
+    return contexts.length > 0;
+  }
+
+  const matchedClients = await clients.matchAll();
+  return matchedClients.some(({ url }) => url === offscreenUrl);
+}
+
+async function ensureOffscreenDocument() {
+  if (await hasOffscreenDocument()) {
+    return;
+  }
+
+  if (!creatingOffscreenDocument) {
+    creatingOffscreenDocument = chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: ["CLIPBOARD"],
+      justification: "Copy a completed LinkedIn profile without changing the active tab."
+    }).finally(() => {
+      creatingOffscreenDocument = null;
+    });
+  }
+
+  await creatingOffscreenDocument;
+}
+
+async function copyTextOffscreen(text) {
+  await ensureOffscreenDocument();
+  const response = await chrome.runtime.sendMessage({
+    target: "offscreen",
+    type: "COPY_TEXT",
+    text
+  });
+
+  if (!response?.ok) {
+    throw new Error(response?.error || "Chrome blocked the automatic clipboard write.");
+  }
+}
 
 function jobKey(jobId) {
   return `${JOB_PREFIX}${jobId}`;
@@ -259,11 +307,23 @@ async function runCapture(jobId) {
       }
     }
 
+    let autoCopyStatus = null;
+    if (job.settings.autoCopy) {
+      try {
+        const formattedProfile = ProfileCopyFormatter.formatProfile(profile, job.settings);
+        await copyTextOffscreen(formattedProfile);
+        autoCopyStatus = "copied";
+      } catch {
+        autoCopyStatus = "failed";
+      }
+    }
+
     await patchJob(jobId, {
       status: "complete",
       statusText: "Profile ready",
       profile,
       warnings,
+      autoCopyStatus,
       completedAt: new Date().toISOString(),
       progress: null
     });

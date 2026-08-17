@@ -269,6 +269,7 @@
         </div>
         <div class="lpc-result" data-lpc-result hidden>
           <textarea data-lpc-output spellcheck="false" aria-label="Copied LinkedIn profile text"></textarea>
+          <p class="lpc-auto-copy" data-lpc-auto-copy hidden></p>
           <p class="lpc-warning" data-lpc-warning hidden></p>
           <button class="lpc-copy" data-lpc-copy type="button">Copy all</button>
         </div>
@@ -294,6 +295,7 @@
     const detail = panel.querySelector("[data-lpc-detail]");
     const result = panel.querySelector("[data-lpc-result]");
     const output = panel.querySelector("[data-lpc-output]");
+    const autoCopy = panel.querySelector("[data-lpc-auto-copy]");
     const warning = panel.querySelector("[data-lpc-warning]");
 
     if (job.status === "complete") {
@@ -301,6 +303,18 @@
       output.value = ProfileCopyFormatter.formatProfile(job.profile, job.settings);
       loading.hidden = true;
       result.hidden = false;
+
+      if (job.autoCopyStatus === "copied") {
+        autoCopy.textContent = "Copied automatically to your clipboard.";
+        autoCopy.classList.remove("lpc-is-warning");
+        autoCopy.hidden = false;
+      } else if (job.autoCopyStatus === "failed") {
+        autoCopy.textContent = "Automatic copy was blocked. Use Copy all below.";
+        autoCopy.classList.add("lpc-is-warning");
+        autoCopy.hidden = false;
+      } else {
+        autoCopy.hidden = true;
+      }
 
       if (job.warnings?.length) {
         warning.textContent = `Used the visible profile version for: ${job.warnings.join(", ")}.`;

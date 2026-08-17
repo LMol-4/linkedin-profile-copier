@@ -19,7 +19,7 @@ A small Chrome extension for copying LinkedIn profile details as clean text.
 
 The active LinkedIn profile stays selected and no separate result tab or window is opened. To include entries hidden behind “Show all,” the extension checks each enabled profile detail page in a temporary inactive tab, one at a time. It uses short, varied pauses between page loads and reads, and every temporary tab closes automatically.
 
-The popup's **Settings** tab controls which sections are included. Markdown formatting is optional and off by default.
+The popup's **Settings** tab controls which sections are included. Markdown formatting is optional and off by default. **Copy automatically** is also off by default; when enabled, the finished text is placed on the system clipboard even if you have switched to another tab. The in-page **Copy all** button remains available as a fallback.
 
 ## Privacy
 

@@ -21,6 +21,22 @@ test("all manifest entry points exist", () => {
   for (const entryPoint of entryPoints) {
     assert.equal(fs.existsSync(path.join(root, entryPoint)), true, `${entryPoint} should exist`);
   }
+
+  assert.equal(
+    fs.existsSync(path.join(root, "src/offscreen/offscreen.html")),
+    true,
+    "the offscreen clipboard document should exist"
+  );
+  assert.equal(
+    fs.existsSync(path.join(root, "src/offscreen/offscreen.js")),
+    true,
+    "the offscreen clipboard script should exist"
+  );
+});
+
+test("allows opt-in background clipboard writes", () => {
+  assert.equal(manifest.permissions.includes("clipboardWrite"), true);
+  assert.equal(manifest.permissions.includes("offscreen"), true);
 });
 
 test("uses one full-copy action without a result tab page", () => {

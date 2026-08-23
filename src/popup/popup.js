@@ -1,6 +1,7 @@
 const tabButtons = Array.from(document.querySelectorAll("[role='tab']"));
 const actionButtons = Array.from(document.querySelectorAll("[data-copy-mode]"));
 const sectionSettings = document.getElementById("section-settings");
+const profileUrlSetting = document.getElementById("profile-url-setting");
 const markdownSetting = document.getElementById("markdown-setting");
 const autoCopySetting = document.getElementById("auto-copy-setting");
 const popupStatus = document.getElementById("popup-status");
@@ -51,6 +52,7 @@ function createSwitch(section) {
 
 function renderSettings() {
   sectionSettings.replaceChildren(...ProfileCopyConfig.sections.map(createSwitch));
+  profileUrlSetting.checked = settings.includeProfileUrl;
   markdownSetting.checked = settings.markdown;
   autoCopySetting.checked = settings.autoCopy;
 }
@@ -130,6 +132,11 @@ markdownSetting.addEventListener("change", () => {
   persistSettings();
 });
 
+profileUrlSetting.addEventListener("change", () => {
+  settings.includeProfileUrl = profileUrlSetting.checked;
+  persistSettings();
+});
+
 autoCopySetting.addEventListener("change", () => {
   settings.autoCopy = autoCopySetting.checked;
   persistSettings();
@@ -138,7 +145,12 @@ autoCopySetting.addEventListener("change", () => {
 async function loadSettings() {
   if (globalThis.chrome?.storage?.sync) {
     try {
-      const stored = await chrome.storage.sync.get(["sections", "markdown", "autoCopy"]);
+      const stored = await chrome.storage.sync.get([
+        "sections",
+        "includeProfileUrl",
+        "markdown",
+        "autoCopy"
+      ]);
       settings = ProfileCopyConfig.normaliseSettings(stored);
     } catch {
       settings = ProfileCopyConfig.normaliseSettings();

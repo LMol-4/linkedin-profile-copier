@@ -12,6 +12,7 @@
 
   const defaultSettings = {
     sections: Object.fromEntries(sections.map(({ key }) => [key, true])),
+    includeProfileUrl: false,
     markdown: false,
     autoCopy: false
   };
@@ -22,6 +23,7 @@
         ...defaultSettings.sections,
         ...(value.sections || {})
       },
+      includeProfileUrl: Boolean(value.includeProfileUrl),
       markdown: Boolean(value.markdown),
       autoCopy: Boolean(value.autoCopy)
     };

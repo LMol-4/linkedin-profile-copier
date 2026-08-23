@@ -24,6 +24,20 @@
     return [`# ${name}`, ...details].join("\n");
   }
 
+  function normaliseProfileUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      if (!/(^|\.)linkedin\.com$/i.test(url.hostname)) {
+        return "";
+      }
+
+      const match = url.pathname.match(/^\/in\/([^/]+)/i);
+      return match ? `https://www.linkedin.com/in/${match[1]}` : "";
+    } catch {
+      return "";
+    }
+  }
+
   function formatSection(label, value, markdown) {
     const body = clean(value);
     if (!body) {
@@ -41,6 +55,13 @@
 
     if (normalised.sections.header) {
       blocks.push(formatHeader(profile?.header, normalised.markdown));
+    }
+
+    if (normalised.includeProfileUrl) {
+      const profileUrl = normaliseProfileUrl(profile?.sourceUrl);
+      if (profileUrl) {
+        blocks.push(`Profile url: ${profileUrl}`);
+      }
     }
 
     for (const section of config.sections) {
@@ -61,7 +82,7 @@
     return output || "No enabled profile details were found.";
   }
 
-  const api = { clean, formatProfile };
+  const api = { clean, normaliseProfileUrl, formatProfile };
   root.ProfileCopyFormatter = api;
 
   if (typeof module !== "undefined" && module.exports) {

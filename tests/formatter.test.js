@@ -5,6 +5,7 @@ const config = require("../src/shared/config.js");
 const formatter = require("../src/shared/formatter.js");
 
 const profile = {
+  sourceUrl: "https://uk.linkedin.com/in/jordan-lee/?miniProfileUrn=abc#about",
   header: {
     name: "Jordan Lee",
     headline: "Product Designer",
@@ -29,6 +30,35 @@ test("formats a clean plain-text profile", () => {
   assert.match(output, /\n\nEXPERIENCE\nLead Product Designer/);
   assert.doesNotMatch(output, /^#/m);
 });
+test("includes a canonical profile URL beneath basic details when enabled", () => {
+  const output = formatter.formatProfile(profile, {
+    ...config.defaultSettings,
+    includeProfileUrl: true
+  });
+
+  assert.ok(output.includes([
+    "Jordan Lee",
+    "Product Designer",
+    "London, United Kingdom",
+    "",
+    "Profile url: https://www.linkedin.com/in/jordan-lee",
+    "",
+    "ABOUT"
+  ].join("\n")));
+  assert.doesNotMatch(output, /miniProfileUrn|#about/);
+});
+
+test("omits the profile URL when disabled or invalid", () => {
+  const disabled = formatter.formatProfile(profile, config.defaultSettings);
+  const invalid = formatter.formatProfile(
+    { ...profile, sourceUrl: "https://example.com/in/jordan-lee" },
+    { ...config.defaultSettings, includeProfileUrl: true }
+  );
+
+  assert.doesNotMatch(disabled, /Profile url:/);
+  assert.doesNotMatch(invalid, /Profile url:/);
+});
+
 
 test("adds Markdown headings and respects disabled sections", () => {
   const output = formatter.formatProfile(profile, {

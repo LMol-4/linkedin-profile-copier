@@ -1,6 +1,6 @@
 # LinkedIn Profile Scraper
 
-A small Chrome extension for copying LinkedIn profile details as clean text.
+A small Chrome extension for copying basic profile details, About, Experience, and Education as clean text. Separate skills, certifications, projects, and languages sections are omitted, along with skill lists attached to roles.
 
 ## Install
 

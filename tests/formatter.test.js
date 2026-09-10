@@ -29,6 +29,7 @@ test("formats a clean plain-text profile", () => {
   assert.match(output, /\n\nABOUT\nI make complex products feel simple\./);
   assert.match(output, /\n\nEXPERIENCE\nLead Product Designer/);
   assert.doesNotMatch(output, /^#/m);
+  assert.doesNotMatch(output, /SKILLS|CERTIFICATIONS|PROJECTS|LANGUAGES|User research|Human-Centred|Open Design Toolkit|French/);
 });
 test("includes a canonical profile URL beneath basic details when enabled", () => {
   const output = formatter.formatProfile(profile, {
@@ -65,7 +66,7 @@ test("adds Markdown headings and respects disabled sections", () => {
     sections: {
       ...config.defaultSettings.sections,
       about: false,
-      projects: false
+      education: false
     },
     markdown: true
   });
@@ -73,5 +74,5 @@ test("adds Markdown headings and respects disabled sections", () => {
   assert.match(output, /^# Jordan Lee/);
   assert.match(output, /\n\n## Experience\n/);
   assert.doesNotMatch(output, /About/);
-  assert.doesNotMatch(output, /Projects/);
+  assert.doesNotMatch(output, /Education/);
 });

@@ -62,8 +62,8 @@ test("does not guess missing headline or location from nearby controls", async (
 });
 
 test("rejects a missing detail list instead of copying the whole page", async (t) => {
-  const page = await fixture(t, "<main><h1>My own profile preview</h1><p>Search suggestions</p></main>", "details/skills/");
-  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "skills" });
+  const page = await fixture(t, "<main><h1>My own profile preview</h1><p>Search suggestions</p></main>", "details/education/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
   assert.equal(result.ok, false);
   assert.match(result.error, /not loaded/);
 });
@@ -202,7 +202,7 @@ test("reads the supplied SDUI structure and expands only description controls", 
   assert.match(result.profile.sections.experience, /Full role description.\nIts final line./);
   assert.match(result.profile.sections.experience, /Assistant General Manager/);
   assert.match(result.profile.sections.education, /Bachelor of Science - BS, Business Administration/);
-  assert.equal(result.profile.sections.skills, "");
+  assert.equal(result.profile.sections.skills, undefined);
   assert.deepEqual(result.profile.detailUrls, { experience: "https://www.linkedin.com/in/jordan/details/experience/" });
   assert.doesNotMatch(JSON.stringify(result.profile), /preview|Unrelated|more|Contact info/);
   assert.equal(await page.evaluate(() => window.expanded), 2);
@@ -218,7 +218,7 @@ test("does not use another person's verified heading as the current profile", as
 });
 
 
-test("reads SDUI profiles without a verification link and includes counted skills", async (t) => {
+test("reads SDUI profiles without a verification link and omits skill noise", async (t) => {
   const html = require("node:fs").readFileSync(path.join(__dirname, "fixtures/profile-sdui-unverified.html"), "utf8");
   const page = await fixture(t, html);
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
@@ -229,12 +229,10 @@ test("reads SDUI profiles without a verification link and includes counted skill
   assert.equal(result.profile.sections.about, "Full summary.\nFinal summary line.");
   assert.match(result.profile.sections.experience, /Full role description.\nFinal role line./);
   assert.match(result.profile.sections.education, /Example University/);
-  assert.match(result.profile.sections.skills, /Sales & Marketing/);
-  assert.match(result.profile.sections.skills, /Forecasting/);
-  assert.doesNotMatch(result.profile.sections.skills, /Skills \(50\)/);
+  assert.equal(result.profile.sections.skills, undefined);
+  assert.doesNotMatch(JSON.stringify(result.profile), /Marketing and \+2 skills|Sales & Marketing|Forecasting/);
   assert.deepEqual(result.profile.detailUrls, {
-    experience: "https://www.linkedin.com/in/jordan/details/experience/",
-    skills: "https://www.linkedin.com/in/jordan/details/skills/"
+    experience: "https://www.linkedin.com/in/jordan/details/experience/"
   });
   assert.doesNotMatch(JSON.stringify(result.profile), /preview|activity|recommendation|Contact info|She\/Her|helped me get this job/);
   assert.equal(await page.evaluate(() => window.expanded), 2);
@@ -242,11 +240,11 @@ test("reads SDUI profiles without a verification link and includes counted skill
 });
 
 test("finds counted section headings without copying the heading", async (t) => {
-  const page = await fixture(t, `<main>${header}<section><h2>Skills (50)</h2><p>Forecasting</p>
-    <a href="/in/jordan/details/skills/">Show all</a></section></main>`);
+  const page = await fixture(t, `<main>${header}<section><h2>Education (2)</h2><p>Example University</p>
+    <a href="/in/jordan/details/education/">Show all</a></section></main>`);
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
-  assert.equal(result.profile.sections.skills, "Forecasting");
-  assert.equal(result.profile.detailUrls.skills, "https://www.linkedin.com/in/jordan/details/skills/");
+  assert.equal(result.profile.sections.education, "Example University");
+  assert.equal(result.profile.detailUrls.education, "https://www.linkedin.com/in/jordan/details/education/");
 });
 
 test("rejects another person's unverified top card", async (t) => {
@@ -299,4 +297,61 @@ test("cancelling during an expansion delay stops further profile clicks", async 
   assert.equal(result.ok, false);
   assert.match(result.error, /cancelled/);
   assert.deepEqual(await page.evaluate(() => window.actions), ["first"]);
+});
+
+
+test("removed sections are neither extracted nor expanded", async (t) => {
+  const removed = ["skills", "certifications", "projects", "languages"];
+  const page = await fixture(t, `<main>${header}<section><h2>About</h2><p>Full summary</p></section>
+    ${removed.map((key) => `<section><div id="${key}"></div><p>Unwanted ${key} content</p>
+      <button class="inline-show-more-text__button" onclick="window.badClick=true">See more</button>
+      <a href="/in/jordan/details/${key}/">Show all</a></section>`).join("")}</main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE", settings: {
+    sections: Object.fromEntries(removed.map((key) => [key, true]))
+  } });
+  assert.deepEqual(result.profile.sections, { about: "Full summary", experience: "", education: "" });
+  assert.deepEqual(result.profile.detailUrls, {});
+  assert.equal(await page.evaluate(() => !!window.badClick), false);
+});
+
+test("settings show only four sections and preserve retained preferences", async (t) => {
+  const page = await popupFixture(t, { settings: { sections: {
+    about: false, skills: true, certifications: true, projects: true, languages: true
+  } } });
+  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  assert.deepEqual(await page.locator("[data-section]").evaluateAll((inputs) => inputs.map((input) => input.dataset.section)),
+    ["header", "about", "experience", "education"]);
+  assert.equal(await page.getByRole("checkbox", { name: "Include About", exact: true }).isChecked(), false);
+  await page.getByRole("tab", { name: "Copy", exact: true }).click();
+  assert.match(await page.locator("#selection-summary").innerText(), /^3 sections/);
+  await page.getByRole("button", { name: "Copy profile", exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => window.requests[0].settings.sections),
+    { header: true, about: false, experience: true, education: true });
+});
+
+test("detail pages omit role skill lists while keeping full descriptions about skills", async (t) => {
+  const page = await fixture(t, `<main><h1>Experience</h1><div class="pvs-list__container">
+    <p>Engineering Manager</p><p>Developed leadership skills across the team.</p>
+    <p><strong>Skills:</strong> Planning · Coaching</p>
+    <p><a href="/in/jordan/overlay/123/skill-associations-details/?tracking=abc">Planning and +2 skills</a></p>
+    <p hidden id="expanded">Used these skills to mentor new engineers.</p>
+    <button class="inline-show-more-text__button" onclick="document.querySelector('#expanded').hidden=false;this.remove()">See more</button>
+    </div></main>`, "details/experience/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "Engineering Manager\nDeveloped leadership skills across the team.\nUsed these skills to mentor new engineers.");
+});
+
+test("education details retain expanded descriptions and load additional schools", async (t) => {
+  const page = await fixture(t, `<main><h1>Education</h1><div class="pvs-list__container">
+    <p>Example University</p><p>Master of Science</p><p>2018–2020</p>
+    <p><span data-testid="expandable-text-box">Thesis and research summary.<span hidden id="full-education"> Advanced research skills.</span><button data-testid="expandable-text-button" onclick="document.querySelector('#full-education').hidden=false;this.remove()">… more</button></span></p>
+    <div class="pvs-list__footer-wrapper"><button onclick="this.parentElement.insertAdjacentHTML('beforebegin','<p>Earlier College</p><p>Bachelor of Science</p><p>2014–2018</p>');this.remove()">Show more results</button></div>
+    </div><aside>Unrelated school recommendation</aside></main>`, "details/education/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.match(result.text, /Thesis and research summary. Advanced research skills./);
+  assert.match(result.text, /Earlier College\nBachelor of Science\n2014–2018/);
+  assert.doesNotMatch(result.text, /Unrelated|Show more/);
 });

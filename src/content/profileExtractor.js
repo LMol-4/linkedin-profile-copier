@@ -8,19 +8,12 @@
   const sectionMeta = {
     about: { ids: ["about"], headings: ["about"] },
     experience: { ids: ["experience"], headings: ["experience"] },
-    education: { ids: ["education"], headings: ["education"] },
-    skills: { ids: ["skills"], headings: ["skills"] },
-    certifications: {
-      ids: ["licenses_and_certifications", "certifications"],
-      headings: ["licenses & certifications", "licenses and certifications", "certifications"]
-    },
-    projects: { ids: ["projects"], headings: ["projects"] },
-    languages: { ids: ["languages"], headings: ["languages"] }
+    education: { ids: ["education"], headings: ["education"] }
   };
 
   const removableLinePatterns = [
     /^(?:show|see|view) (?:more|less)$/i,
-    /^(?:show|see|view) all(?: \d+)?(?: experiences?|educations?|skills|certifications|projects|languages)?$/i,
+    /^(?:show|see|view) all(?: \d+)?(?: experiences?|educations?)?$/i,
     /^expand (?:this )?section/i,
     /^collapse (?:this )?section/i,
     /^end of list$/i,
@@ -42,7 +35,7 @@
   let capturePanelState = null;
   const excludedContainers = "script, style, nav, aside, footer, "
     + "[role='dialog'], [hidden], .visually-hidden, .sr-only, .lpc-panel";
-  const excludedContent = `button, [role='button'], ${excludedContainers}`;
+  const excludedContent = `button, [role='button'], a[href*='/skill-associations-details'], ${excludedContainers}`;
 
   function primaryRoot() {
     const main = document.querySelector(".scaffold-layout__main")
@@ -151,6 +144,7 @@
       : cleanedLines;
     const lines = boundedLines.filter((line) => {
       const lower = line.toLowerCase().replace(/\s*\(\d+\)$/, "");
+      if (key === "experience" && /^skills\s*:/i.test(line)) return false;
       return !headings.includes(lower) && !headings.some((heading) => lower === `${heading} section`);
     });
 

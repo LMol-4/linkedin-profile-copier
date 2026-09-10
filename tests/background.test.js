@@ -77,8 +77,8 @@ test("concurrent starts and runs share one job and one inactive detail tab", asy
 });
 
 test("missing, disabled and unrelated detail links never open tabs", async () => {
-  for (const detailUrls of [{}, { skills: "https://www.linkedin.com/search/results/" },
-    { skills: "https://www.linkedin.com/in/me/details/skills/" }]) {
+  for (const detailUrls of [{}, { education: "https://www.linkedin.com/search/results/" },
+    { education: "https://www.linkedin.com/in/me/details/education/" }]) {
     const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {}, detailUrls } });
     const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
     await h.context.runCapture(job.jobId);
@@ -195,8 +195,8 @@ test("only one profile can start or collect at a time", async () => {
 
 test("a checkpoint redirect stops all remaining detail tabs and preserves available text", async () => {
   const h = setup({ redirect: "https://www.linkedin.com/checkpoint/challenge/", profile: {
-    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer", skills: "Planning" },
-    detailUrls: { experience: `${sourceUrl}details/experience/`, skills: `${sourceUrl}details/skills/` }
+    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer", education: "University" },
+    detailUrls: { experience: `${sourceUrl}details/experience/`, education: `${sourceUrl}details/education/` }
   } });
   const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
   await h.context.runCapture(job.jobId);
@@ -204,7 +204,21 @@ test("a checkpoint redirect stops all remaining detail tabs and preserves availa
   assert.equal(h.created.length, 1);
   assert.equal(h.removed.length, 1);
   assert.equal(result.status, "complete");
-  assert.deepEqual(result.warnings, ["Experience", "Skills"]);
-  assert.deepEqual(result.profile.sections, { experience: "Engineer", skills: "Planning" });
+  assert.deepEqual(result.warnings, ["Experience", "Education"]);
+  assert.deepEqual(result.profile.sections, { experience: "Engineer", education: "University" });
   assert.equal(h.messages.some((message) => message.type === "EXTRACT_DETAIL_SECTION"), false);
+});
+
+
+test("removed sections never open detail tabs even with older saved settings", async () => {
+  const removed = ["skills", "certifications", "projects", "languages"];
+  const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {},
+    detailUrls: Object.fromEntries(removed.map((section) => [section, `${sourceUrl}details/${section}/`]))
+  } });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {
+    sections: Object.fromEntries(removed.map((section) => [section, true]))
+  } });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.created.length, 0);
+  assert.equal(h.stored[key(job.jobId)].status, "complete");
 });

@@ -3,11 +3,7 @@
     { key: "header", label: "Basic details", description: "Name, headline, and location" },
     { key: "about", label: "About", description: "Profile summary" },
     { key: "experience", label: "Experience", description: "Roles and work history" },
-    { key: "education", label: "Education", description: "Schools and qualifications" },
-    { key: "skills", label: "Skills", description: "Listed professional skills" },
-    { key: "certifications", label: "Certifications", description: "Licenses and certifications" },
-    { key: "projects", label: "Projects", description: "Selected projects" },
-    { key: "languages", label: "Languages", description: "Languages and proficiency" }
+    { key: "education", label: "Education", description: "Schools and qualifications" }
   ];
 
   const defaultSettings = {
@@ -43,8 +39,7 @@
     isProfilePage,
     sections,
     detailPaths: {
-      experience: "experience", education: "education", skills: "skills",
-      certifications: "certifications", projects: "projects", languages: "languages"
+      experience: "experience", education: "education"
     },
     defaultSettings,
     normaliseSettings

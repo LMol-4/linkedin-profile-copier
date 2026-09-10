@@ -32,3 +32,14 @@ test("normalises missing and unexpected saved section settings", () => {
   assert.equal(settings.sections.experience, true);
   assert.equal(settings.sections.unknown, undefined);
 });
+
+
+test("old section preferences retain supported choices and discard removed sections", () => {
+  const settings = config.normaliseSettings({ sections: {
+    header: false, about: true, experience: false, education: true,
+    skills: true, certifications: true, projects: true, languages: true
+  }, startOnOpen: true, autoCopy: true });
+  assert.deepEqual(settings.sections, { header: false, about: true, experience: false, education: true });
+  assert.equal(settings.startOnOpen, true);
+  assert.equal(settings.autoCopy, true);
+});

@@ -12,18 +12,27 @@ A small Chrome extension for copying LinkedIn profile details as clean text.
 
 ## Use
 
-1. Open a LinkedIn profile at `linkedin.com/in/...`.
-2. Click the extension icon.
-3. Click **Copy full profile**.
-4. Use **Copy all** in the panel that appears on the LinkedIn profile.
+1. Open the main LinkedIn profile at `linkedin.com/in/...`.
+2. Click the extension icon, then **Copy profile**.
+3. Review the result in the panel on LinkedIn and select **Copy all**.
 
-The active LinkedIn profile stays selected and no separate result tab or window is opened. To include entries hidden behind “Show all,” the extension checks each enabled profile detail page in a temporary inactive tab, one at a time. It uses short, varied pauses between page loads and reads, and every temporary tab closes automatically.
+The popup shows progress. You can close the popup while collection continues. **Cancel copy** in the popup, or closing the panel on LinkedIn, stops collection and closes temporary tabs. Navigating away from the profile or closing its tab also cancels the job.
 
-The popup's **Settings** tab controls which sections are included. Markdown formatting is optional and off by default. **Copy automatically** is also off by default; when enabled, the finished text is placed on the system clipboard even if you have switched to another tab. The in-page **Copy all** button remains available as a fallback.
+The extension expands supported “see more” descriptions. It opens a temporary inactive tab only for an enabled section with a matching “Show all” link on that profile, then expands descriptions and loads more entries there. Your profile stays selected. If LinkedIn redirects, fails to load, or reaches the collection limit, the result shows a warning and keeps the available text. Detail reads are bounded to 15 seconds and 20 loading passes per section.
+
+### Settings
+
+Settings is always accessible in the popup, including when automatic start is enabled.
+
+- **Start when icon is clicked** begins collection immediately when you open the popup on a profile. Off by default. The popup stays open so you can check progress, cancel, or change Settings. Turning it on takes effect the next time you open the popup.
+- **Copy to clipboard when ready** automatically copies the finished text, even if you switch tabs. Off by default and independent of automatic start. Enable both for one-click copying. **Copy all** remains available if Chrome blocks the automatic clipboard write.
+- Choose the sections to include, optionally add the profile URL, and turn on Markdown headings if needed. Settings save automatically and apply to the next copy.
+
+On other pages, copying is disabled and Settings remains available. Open the main profile rather than a detail page or search result.
 
 ## Privacy
 
-Profile data is processed locally and kept only while the in-page copy panel is open. The extension does not send profile data to an external service.
+Profile data is processed locally and stored in Chrome session storage while the copy panel is open. Closing the panel, leaving the profile, or starting a replacement copy clears its stored data. The extension does not send profile data to an external service.
 
 This project is not affiliated with or endorsed by LinkedIn.
 
@@ -31,8 +40,18 @@ This project is not affiliated with or endorsed by LinkedIn.
 
 There is no build step. After editing, reload the extension from `chrome://extensions`.
 
-Run the small test suite with:
+Run the unit tests with:
 
 ```sh
 npm test
 ```
+
+Browser regression tests use Playwright as a development dependency; the extension has no runtime dependencies or build step.
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+These tests use synthetic LinkedIn pages to check extraction, popup behavior, and the loaded extension. They do not require a LinkedIn account. When validating against LinkedIn itself, check a profile with long descriptions and multiple entries; LinkedIn layouts and loading behavior can change.

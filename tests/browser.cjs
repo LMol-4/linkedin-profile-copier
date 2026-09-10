@@ -94,6 +94,87 @@ test("does not extract a different detail section or expand disabled sections", 
   assert.equal(detail.ok, false);
 });
 
+
+async function popupFixture(t, options = {}) {
+  const page = await browser.newPage({ viewport: { width: 378, height: 600 } });
+  t.after(() => page.close());
+  await page.addInitScript((options) => {
+    window.requests = [];
+    window.settingsWrites = [];
+    window.storageListeners = [];
+    window.chrome = {
+      tabs: { query: async () => [{ id: 1, url: options.url || "https://www.linkedin.com/in/jordan/" }] },
+      storage: {
+        sync: {
+          get: async () => { if (options.loadFails) throw new Error("Storage unavailable"); return options.settings || {}; },
+          set: async (value) => { if (options.saveFails) throw new Error("Storage unavailable"); window.settingsWrites.push(value); }
+        },
+        session: { get: async (key) => ({ [key]: { status: "running", statusText: "Reading profile…" } }) },
+        onChanged: { addListener: (fn) => window.storageListeners.push(fn) }
+      },
+      runtime: { sendMessage: async (message) => {
+        window.requests.push(message);
+        if (message.type === "CLEAR_CAPTURE_JOB") window.storageListeners.forEach((fn) => fn({ "profile-copy-job:job": {} }, "session"));
+        return { ok: true, jobId: "job" };
+      } }
+    };
+  }, options);
+  await page.goto(require("node:url").pathToFileURL(path.join(root, "src/popup/popup.html")).href);
+  return page;
+}
+
+test("icon auto-start runs once and leaves settings reachable and editable", async (t) => {
+  const page = await popupFixture(t, { settings: { startOnOpen: true } });
+  await page.waitForFunction(() => window.requests.length === 1);
+  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  const autoStart = page.getByRole("checkbox", { name: "Start when icon is clicked" });
+  assert.equal(await autoStart.isChecked(), true);
+  await autoStart.uncheck();
+  await page.waitForFunction(() => window.settingsWrites.length === 1);
+  assert.equal(await page.evaluate(() => window.settingsWrites[0].startOnOpen), false);
+  assert.equal(await page.evaluate(() => window.requests.length), 1);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 378), true);
+});
+
+test("non-profile pages never auto-start and still allow settings changes", async (t) => {
+  const page = await popupFixture(t, { url: "https://www.linkedin.com/feed/", settings: { startOnOpen: true } });
+  await page.waitForSelector("#selection-summary:not(:empty)");
+  assert.equal(await page.locator("[data-copy-mode]").isDisabled(), true);
+  assert.equal(await page.evaluate(() => window.requests.length), 0);
+  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  assert.equal(await page.getByRole("checkbox", { name: "Start when icon is clicked" }).isEnabled(), true);
+});
+
+test("manual copy, cancellation, and keyboard navigation work", async (t) => {
+  const page = await popupFixture(t);
+  await page.getByRole("button", { name: "Copy profile", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel copy" }).click();
+  assert.equal(await page.getByRole("button", { name: "Copy profile", exact: true }).isEnabled(), true);
+  assert.equal(await page.evaluate(() => window.requests.filter((m) => m.type === "CLEAR_CAPTURE_JOB").length), 1);
+  await page.getByRole("tab", { name: "Copy", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.locator("#settings-tab").getAttribute("aria-selected"), "true");
+});
+
+test("settings load failure never starts a copy with defaults", async (t) => {
+  const page = await popupFixture(t, { loadFails: true });
+  await page.waitForSelector("#popup-status.is-error");
+  assert.equal(await page.locator("[data-copy-mode]").isDisabled(), true);
+  assert.equal(await page.evaluate(() => window.requests.length), 0);
+});
+
+test("settings save errors are shown and an empty selection cannot start copying", async (t) => {
+  const page = await popupFixture(t, { saveFails: true });
+  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Start when icon is clicked" }).check();
+  await page.waitForSelector("#saved-status.is-error");
+  assert.match(await page.locator("#saved-status").innerText(), /Could not save/);
+  for (const box of await page.locator("[data-section]").all()) await box.uncheck();
+  await page.getByRole("tab", { name: "Copy", exact: true }).click();
+  assert.equal(await page.locator("[data-copy-mode]").isDisabled(), true);
+});
+
+
 test("waits for pending pagination and ignores a title-only detail card", async (t) => {
   const page = await fixture(t, `<main><section><h1>Experience</h1></section>
     <aside><div class="pvs-list__container">My own profile preview</div></aside>

@@ -1,40 +1,42 @@
 const tabButtons = Array.from(document.querySelectorAll("[role='tab']"));
-const actionButtons = Array.from(document.querySelectorAll("[data-copy-mode]"));
+const copyButton = document.querySelector("[data-copy-mode]");
+const cancelButton = document.getElementById("cancel-copy");
 const sectionSettings = document.getElementById("section-settings");
-const profileUrlSetting = document.getElementById("profile-url-setting");
-const markdownSetting = document.getElementById("markdown-setting");
-const autoCopySetting = document.getElementById("auto-copy-setting");
 const popupStatus = document.getElementById("popup-status");
 const savedStatus = document.getElementById("saved-status");
-
+const settingInputs = {
+  startOnOpen: document.getElementById("start-on-open-setting"),
+  autoCopy: document.getElementById("auto-copy-setting"),
+  includeProfileUrl: document.getElementById("profile-url-setting"),
+  markdown: document.getElementById("markdown-setting")
+};
 let settings = ProfileCopyConfig.normaliseSettings();
-let savedStatusTimer;
-
-actionButtons.forEach((button) => {
-  button.disabled = true;
-});
+let activeTab;
+let currentJobId;
+let busy = false;
+let ready = false;
+let saveQueue = Promise.resolve();
 
 function selectTab(selectedButton) {
   for (const button of tabButtons) {
     const selected = button === selectedButton;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
     document.getElementById(button.dataset.panel).hidden = !selected;
   }
 }
 
 function createSwitch(section) {
-  const row = document.createElement("div");
+  const row = document.createElement("label");
   row.className = "setting-row";
-
   const copy = document.createElement("div");
   const label = document.createElement("strong");
   const description = document.createElement("span");
   label.textContent = section.label;
   description.textContent = section.description;
   copy.append(label, description);
-
-  const switchLabel = document.createElement("label");
+  const switchLabel = document.createElement("span");
   switchLabel.className = "switch";
   const input = document.createElement("input");
   input.type = "checkbox";
@@ -45,122 +47,139 @@ function createSwitch(section) {
   track.className = "switch-track";
   track.setAttribute("aria-hidden", "true");
   switchLabel.append(input, track);
-
   row.append(copy, switchLabel);
   return row;
 }
 
-function renderSettings() {
-  sectionSettings.replaceChildren(...ProfileCopyConfig.sections.map(createSwitch));
-  profileUrlSetting.checked = settings.includeProfileUrl;
-  markdownSetting.checked = settings.markdown;
-  autoCopySetting.checked = settings.autoCopy;
+function updateCopyState() {
+  const count = Object.values(settings.sections).filter(Boolean).length;
+  document.getElementById("selection-summary").textContent =
+    `${count} section${count === 1 ? "" : "s"} · ${settings.markdown ? "Markdown" : "Plain text"}${settings.includeProfileUrl ? " · Profile URL" : ""}`;
+  document.getElementById("copy-help").textContent = settings.autoCopy
+    ? "Your selected sections will be copied to your clipboard when ready."
+    : "Review the text on the profile, then select Copy all.";
+  copyButton.disabled = !ready || busy || !ProfileCopyConfig.isProfilePage(activeTab?.url)
+    || (!count && !settings.includeProfileUrl);
+  copyButton.textContent = busy ? "Copying…" : "Copy profile";
+  cancelButton.hidden = !busy || !currentJobId;
 }
 
-function showSaved() {
-  window.clearTimeout(savedStatusTimer);
-  savedStatus.textContent = "Saved";
-  savedStatusTimer = window.setTimeout(() => {
-    savedStatus.textContent = "";
-  }, 1200);
-}
-
-async function persistSettings() {
-  if (globalThis.chrome?.storage?.sync) {
-    await chrome.storage.sync.set(settings);
-  }
-  showSaved();
-}
-
-function setBusy(busy) {
-  for (const button of actionButtons) {
-    button.disabled = busy;
-    button.textContent = busy ? "Starting…" : "Copy full profile";
-  }
-}
-
-async function startCopy() {
-  await settingsReady;
-  popupStatus.classList.remove("is-error");
-  popupStatus.textContent = "Opening the copy panel on LinkedIn…";
-  setBusy(true);
-
-  try {
-    if (!globalThis.chrome?.runtime) {
-      throw new Error("Load the extension in Chrome to copy a profile.");
-    }
-
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const response = await chrome.runtime.sendMessage({
-      type: "CREATE_CAPTURE_JOB",
-      sourceTabId: activeTab?.id,
-      settings
-    });
-
-    if (!response?.ok) {
-      throw new Error(response?.error || "The copy could not be started.");
-    }
-
-    window.close();
-  } catch (error) {
-    popupStatus.textContent = error.message || "Open a LinkedIn profile and try again.";
-    popupStatus.classList.add("is-error");
-    setBusy(false);
-  }
-}
-
-tabButtons.forEach((button) => {
-  button.addEventListener("click", () => selectTab(button));
-});
-
-actionButtons.forEach((button) => {
-  button.addEventListener("click", startCopy);
-});
-
-sectionSettings.addEventListener("change", (event) => {
-  const sectionKey = event.target.dataset.section;
-  if (!sectionKey) {
-    return;
-  }
-
-  settings.sections[sectionKey] = event.target.checked;
-  persistSettings();
-});
-
-markdownSetting.addEventListener("change", () => {
-  settings.markdown = markdownSetting.checked;
-  persistSettings();
-});
-
-profileUrlSetting.addEventListener("change", () => {
-  settings.includeProfileUrl = profileUrlSetting.checked;
-  persistSettings();
-});
-
-autoCopySetting.addEventListener("change", () => {
-  settings.autoCopy = autoCopySetting.checked;
-  persistSettings();
-});
-
-async function loadSettings() {
-  if (globalThis.chrome?.storage?.sync) {
-    try {
-      const stored = await chrome.storage.sync.get([
-        "sections",
-        "includeProfileUrl",
-        "markdown",
-        "autoCopy"
-      ]);
-      settings = ProfileCopyConfig.normaliseSettings(stored);
-    } catch {
-      settings = ProfileCopyConfig.normaliseSettings();
-    }
-  }
-
-  renderSettings();
-  actionButtons.forEach((button) => {
-    button.disabled = false;
+function persistSettings() {
+  updateCopyState();
+  const snapshot = { ...settings, sections: { ...settings.sections } };
+  savedStatus.textContent = "Saving…";
+  savedStatus.classList.remove("is-error");
+  saveQueue = saveQueue.catch(() => undefined).then(() => chrome.storage.sync.set(snapshot));
+  saveQueue.then(() => { savedStatus.textContent = "Saved"; }).catch(() => {
+    savedStatus.textContent = "Could not save. Change the setting again to retry.";
+    savedStatus.classList.add("is-error");
   });
 }
 
-const settingsReady = loadSettings();
+function renderJob(job) {
+  busy = ["ready", "running"].includes(job.status);
+  popupStatus.classList.toggle("is-error", job.status === "failed");
+  popupStatus.textContent = job.status === "complete"
+    ? (job.autoCopyStatus === "copied" ? "Copied to clipboard." : "Ready on the profile. Select Copy all there.")
+    : job.error || job.statusText;
+  if (job.status === "complete" && job.warnings?.length) popupStatus.textContent += " Some details could not be loaded.";
+  updateCopyState();
+}
+
+async function startCopy() {
+  if (copyButton.disabled) return;
+  busy = true;
+  updateCopyState();
+  popupStatus.classList.remove("is-error");
+  popupStatus.textContent = "Starting on this profile…";
+  try {
+    await saveQueue;
+    const response = await chrome.runtime.sendMessage({
+      type: "CREATE_CAPTURE_JOB", sourceTabId: activeTab.id, settings
+    });
+    if (!response?.ok) throw new Error(response?.error || "The copy could not be started.");
+    currentJobId = response.jobId;
+    const stored = await chrome.storage.session.get(`profile-copy-job:${currentJobId}`);
+    const job = stored[`profile-copy-job:${currentJobId}`];
+    if (job) renderJob(job);
+    else { busy = false; popupStatus.textContent = "Copy cancelled. You can try again."; }
+  } catch (error) {
+    popupStatus.textContent = error.message || "Open a LinkedIn profile and try again.";
+    popupStatus.classList.add("is-error");
+    busy = false;
+  }
+  updateCopyState();
+}
+
+cancelButton.addEventListener("click", async () => {
+  cancelButton.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "CLEAR_CAPTURE_JOB", jobId: currentJobId });
+    if (!response?.ok) throw new Error(response?.error || "Could not cancel. Try closing the panel on the profile.");
+  } catch (error) {
+    popupStatus.textContent = error.message;
+    popupStatus.classList.add("is-error");
+  } finally {
+    cancelButton.disabled = false;
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  const change = changes[`profile-copy-job:${currentJobId}`];
+  if (area !== "session" || !change) return;
+  if (change.newValue) renderJob(change.newValue);
+  else {
+    busy = false;
+    currentJobId = null;
+    popupStatus.textContent = "Copy cancelled. You can start again.";
+    updateCopyState();
+  }
+});
+
+tabButtons.forEach((button, index) => {
+  button.addEventListener("click", () => selectTab(button));
+  button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabButtons.length - 1
+      : (index + (event.key === "ArrowRight" ? 1 : -1) + tabButtons.length) % tabButtons.length;
+    selectTab(tabButtons[next]);
+    tabButtons[next].focus();
+  });
+});
+copyButton.addEventListener("click", startCopy);
+sectionSettings.addEventListener("change", (event) => {
+  const key = event.target.dataset.section;
+  if (key) { settings.sections[key] = event.target.checked; persistSettings(); }
+});
+for (const [key, input] of Object.entries(settingInputs)) {
+  input.disabled = true;
+  input.addEventListener("change", () => { settings[key] = input.checked; persistSettings(); });
+}
+
+async function initialise() {
+  try {
+    const [stored, tabs] = await Promise.all([
+      chrome.storage.sync.get(Object.keys(ProfileCopyConfig.defaultSettings)),
+      chrome.tabs.query({ active: true, currentWindow: true })
+    ]);
+    settings = ProfileCopyConfig.normaliseSettings(stored);
+    activeTab = tabs[0];
+    sectionSettings.replaceChildren(...ProfileCopyConfig.sections.map(createSwitch));
+    for (const [key, input] of Object.entries(settingInputs)) {
+      input.checked = settings[key];
+      input.disabled = false;
+    }
+    ready = true;
+    updateCopyState();
+    if (!ProfileCopyConfig.isProfilePage(activeTab?.url)) {
+      popupStatus.textContent = "Open the main LinkedIn profile to copy. Settings is still available.";
+    } else if (settings.startOnOpen) {
+      await startCopy();
+    }
+  } catch {
+    popupStatus.textContent = "Could not load settings. Close and reopen the extension to retry.";
+    popupStatus.classList.add("is-error");
+  }
+}
+initialise();

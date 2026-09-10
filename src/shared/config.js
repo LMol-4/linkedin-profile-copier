@@ -14,7 +14,8 @@
     sections: Object.fromEntries(sections.map(({ key }) => [key, true])),
     includeProfileUrl: false,
     markdown: false,
-    autoCopy: false
+    autoCopy: false,
+    startOnOpen: false
   };
 
   function normaliseSettings(value = {}) {
@@ -23,7 +24,8 @@
       sections: Object.fromEntries(sections.map(({ key }) => [key, value.sections?.[key] !== false])),
       includeProfileUrl: Boolean(value.includeProfileUrl),
       markdown: Boolean(value.markdown),
-      autoCopy: value.autoCopy === true
+      autoCopy: value.autoCopy === true,
+      startOnOpen: value.startOnOpen === true
     };
   }
 

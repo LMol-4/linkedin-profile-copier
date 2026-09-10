@@ -19,9 +19,8 @@
   };
 
   const removableLinePatterns = [
-    /^show (all|more|less)(?:\s+\d+)?/i,
-    /^see (all|more|less)/i,
-    /^view (all|more)/i,
+    /^(?:show|see|view) (?:more|less)$/i,
+    /^(?:show|see|view) all(?: \d+)?(?: experiences?|educations?|skills|certifications|projects|languages)?$/i,
     /^expand (?:this )?section/i,
     /^collapse (?:this )?section/i,
     /^end of list$/i,
@@ -39,11 +38,30 @@
     /^linkedin corporation ©\s*\d{4}$/i
   ];
   const startedCaptureJobs = new Set();
-  const dismissedCaptureJobs = new Set();
   let capturePanelState = null;
+  const excludedContent = "script, style, button, [role='button'], nav, aside, footer, "
+    + "[role='dialog'], [hidden], .visually-hidden, .sr-only, .lpc-panel";
 
+  function primaryRoot() {
+    return document.querySelector(".scaffold-layout__main")
+      || document.querySelector("main, [role='main']");
+  }
+
+  function profileName() {
+    return Array.from(primaryRoot()?.querySelectorAll("h1") || [])
+      .find((heading) => !heading.closest(excludedContent));
+  }
+
+  // Read rendered profile text once, omitting controls and accessibility duplicates.
   function elementText(element) {
-    return element ? element.innerText || element.textContent || "" : "";
+    if (!element) return "";
+    if (element.nodeType === 3) return element.textContent;
+    if (element.nodeType !== 1 || element.matches(excludedContent)) return "";
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || ["hidden", "collapse"].includes(style.visibility)) return "";
+    if (element.tagName === "BR") return "\n";
+    const text = Array.from(element.childNodes, elementText).join("");
+    return /^(block|flex|grid|list-item|table)/.test(style.display) ? `\n${text}\n` : text;
   }
 
   function normaliseLine(line) {
@@ -77,26 +95,25 @@
       return null;
     }
 
+    const main = primaryRoot();
+    if (!main) return null;
     for (const id of meta.ids) {
-      const anchor = document.getElementById(id);
-      const section = anchor?.closest("section, .artdeco-card")
-        || anchor?.parentElement?.closest("section, .artdeco-card");
-      if (section) {
+      const anchor = main.querySelector(`[id="${id}"]`);
+      const section = anchor?.closest("section, .artdeco-card");
+      if (section && section !== main && main.contains(section) && !anchor.closest(excludedContent)) {
         return section;
       }
     }
 
-    const primaryRoot = document.querySelector(".scaffold-layout__main")
-      || document.querySelector("main, [role='main']")
-      || document.body;
-    const headings = primaryRoot.querySelectorAll(
+    const headings = main.querySelectorAll(
       "h1, h2, h3, [role='heading'], .pvs-header__title"
     );
 
     for (const heading of headings) {
       const headingText = normaliseLine(elementText(heading)).toLowerCase();
-      if (meta.headings.some((value) => headingText === value || headingText.startsWith(`${value} `))) {
-        return heading.closest("section, .artdeco-card") || heading.parentElement;
+      if (meta.headings.includes(headingText) && !heading.closest(excludedContent)) {
+        const section = heading.closest("section, .artdeco-card");
+        if (section && section !== main && main.contains(section)) return section;
       }
     }
 
@@ -125,12 +142,10 @@
   }
 
   function extractHeader() {
-    const main = document.querySelector(".scaffold-layout__main")
-      || document.querySelector("main, [role='main']")
-      || document.body;
-    const nameElement = main.querySelector("h1");
-    const card = nameElement?.closest("section") || main.querySelector("section") || main;
+    const nameElement = profileName();
+    const card = nameElement?.closest("section, .artdeco-card");
     const name = normaliseLine(elementText(nameElement));
+    if (!card) return { name, headline: "", location: "" };
 
     const headlineElement = card.querySelector(
       ".text-body-medium.break-words, .text-body-medium[data-generated-suggestion-target]"
@@ -151,26 +166,35 @@
       location = "";
     }
 
-    if (!headline || !location) {
-      const cardLines = cleanLines(elementText(card));
-      const nameIndex = cardLines.indexOf(name);
-      const details = cardLines
-        .slice(nameIndex >= 0 ? nameIndex + 1 : 0)
-        .filter((line) => (
-          !isConnectionDegree(line)
-          && !/^(contact info|connections?|followers?|message|connect|follow|more)$/i.test(line)
-        ));
-
-      headline ||= details[0] || "";
-      location ||= details.find((line) => line !== headline && !/\d[\d,.]*\+?\s+(connections?|followers?)/i.test(line)) || "";
-    }
-
     return { name, headline, location };
   }
 
-  function extractBaseProfile(settings = {}) {
+  const pause = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  async function expandDescriptions(section) {
+    let expanded = false;
+    for (const button of section?.querySelectorAll(
+      "button.inline-show-more-text__button, button.lt-line-clamp__more, button[aria-label='see more'], "
+      + ".inline-show-more-text button[aria-expanded='false']"
+    ) || []) {
+      if (!button.closest(excludedContent.replace("button, [role='button'], ", ""))
+        && button.getClientRects().length > 0 && !button.disabled
+        && button.getAttribute("aria-expanded") !== "true"
+        && /^(?:…|\.{3})?\s*(?:(?:see|show)\s+)?more$/i.test(normaliseLine(button.textContent))) {
+        button.click();
+        expanded = true;
+      }
+    }
+    if (expanded) await pause(150);
+  }
+
+  async function extractBaseProfile(settings = {}) {
     const selected = settings.sections || {};
     const sections = {};
+    const detailUrls = {};
+    if (!/^\/in\/[^/]+\/?$/.test(window.location.pathname) || !profileName()) {
+      throw new Error("Open the main LinkedIn profile and wait for it to load.");
+    }
 
     for (const key of Object.keys(sectionMeta)) {
       if (selected[key] === false) {
@@ -178,48 +202,76 @@
       }
 
       const section = findSection(key);
+      await expandDescriptions(section);
       sections[key] = cleanSectionText(elementText(section), key);
+      const path = ProfileCopyConfig.detailPaths[key];
+      for (const link of section?.querySelectorAll("a[href]") || []) {
+        const url = new URL(link.href, window.location.href);
+        const expected = `${window.location.pathname.replace(/\/$/, "")}/details/${path}/`;
+        if (path && url.origin === window.location.origin && `${url.pathname.replace(/\/$/, "")}/` === expected) {
+          detailUrls[key] = `${url.origin}${expected}`;
+          break;
+        }
+      }
     }
 
     return {
       sourceUrl: window.location.href,
       capturedAt: new Date().toISOString(),
       header: selected.header === false ? {} : extractHeader(),
-      sections
+      sections,
+      detailUrls
     };
   }
 
-  function extractDetailSection(key) {
-    const section = findSection(key);
-    if (section) {
-      return cleanSectionText(elementText(section), key);
+  async function extractDetailSection(key) {
+    const path = ProfileCopyConfig.detailPaths[key];
+    if (!path || !window.location.pathname.replace(/\/?$/, "/").endsWith(`/details/${path}/`)) {
+      throw new Error("LinkedIn opened a different page.");
     }
-
-    const primaryRoot = document.querySelector(".scaffold-layout__main")
-      || document.querySelector("main, [role='main']");
-    const detailList = primaryRoot?.querySelector(
+    const findContent = () => findSection(key) || Array.from(primaryRoot()?.querySelectorAll(
       ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
-    );
-    return cleanSectionText(elementText(detailList || primaryRoot), key);
+    ) || []).find((list) => !list.closest(excludedContent));
+    let content;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      content = findContent();
+      if (cleanSectionText(elementText(content), key)) break;
+      await pause(300);
+    }
+    if (!content) throw new Error("The requested section has not loaded.");
+
+    let previous = "";
+    let stable = 0;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      content = findContent();
+      await expandDescriptions(content);
+      const text = cleanSectionText(elementText(content), key);
+      // Only list pagination buttons on a verified detail page may load more entries.
+      const more = Array.from(primaryRoot()?.querySelectorAll(
+        ".pvs-list__footer-wrapper button, button.scaffold-finite-scroll__load-button"
+      ) || []).find((button) => (
+        /^(?:show|load) more(?: results)?$/i.test(normaliseLine(button.textContent))
+        && !button.disabled && button.getClientRects().length > 0
+      ));
+      if (more) more.click();
+      content?.lastElementChild?.scrollIntoView({ block: "end" });
+      stable = text === previous && !more ? stable + 1 : 0;
+      if (text && stable >= 3) return { text, incomplete: false };
+      previous = text;
+      await pause(400);
+    }
+    if (!previous) throw new Error("The requested section has not loaded.");
+    return { text: previous, incomplete: true };
   }
 
-  function removeCapturePanel() {
-    if (!capturePanelState) {
-      return;
-    }
-
-    const { job } = capturePanelState;
-    capturePanelState.element.remove();
+  function removeCapturePanel(clearJob = true) {
+    if (!capturePanelState) return;
+    const { job, element } = capturePanelState;
+    element.remove();
     capturePanelState = null;
-
-    if (["complete", "failed"].includes(job.status)) {
-      chrome.runtime.sendMessage({
-        type: "CLEAR_CAPTURE_JOB",
-        jobId: job.id
-      }).catch(() => undefined);
-    } else {
-      dismissedCaptureJobs.add(job.id);
-    }
+    startedCaptureJobs.delete(job.id);
+    if (clearJob) chrome.runtime.sendMessage({ type: "CLEAR_CAPTURE_JOB", jobId: job.id })
+      .catch(() => undefined);
   }
 
   async function copyCaptureOutput() {
@@ -234,7 +286,10 @@
     } catch {
       textarea.focus();
       textarea.select();
-      document.execCommand("copy");
+      if (!document.execCommand("copy")) {
+        button.textContent = "Copy blocked — press Ctrl+C / ⌘C";
+        return;
+      }
     }
 
     button.textContent = "Copied";
@@ -297,6 +352,9 @@
     const output = panel.querySelector("[data-lpc-output]");
     const autoCopy = panel.querySelector("[data-lpc-auto-copy]");
     const warning = panel.querySelector("[data-lpc-warning]");
+    const close = panel.querySelector(".lpc-close");
+    close.setAttribute("aria-label", ["ready", "running"].includes(job.status)
+      ? "Cancel copy and close" : "Close profile copier");
 
     if (job.status === "complete") {
       title.textContent = job.profile?.header?.name || "Profile ready";
@@ -317,7 +375,7 @@
       }
 
       if (job.warnings?.length) {
-        warning.textContent = `Used the visible profile version for: ${job.warnings.join(", ")}.`;
+        warning.textContent = `Some details could not be loaded: ${job.warnings.join(", ")}. Available text is included.`;
         warning.hidden = false;
       } else {
         warning.hidden = true;
@@ -340,33 +398,46 @@
     status.textContent = job.statusText || "Reading profile…";
     detail.textContent = job.progress
       ? `Section ${job.progress.current} of ${job.progress.total}. Temporary tabs close automatically.`
-      : "Keep this profile tab open.";
+      : "Keep this profile open. Close this panel to cancel.";
     loading.hidden = false;
     result.hidden = true;
   }
 
   function showCapturePanel(job) {
-    dismissedCaptureJobs.delete(job.id);
     renderCaptureJob(job);
 
     if (job.status === "ready" && !startedCaptureJobs.has(job.id)) {
       startedCaptureJobs.add(job.id);
       window.setTimeout(() => {
         chrome.runtime.sendMessage({ type: "RUN_CAPTURE", jobId: job.id })
-          .catch(() => startedCaptureJobs.delete(job.id));
+          .then((response) => {
+            if (response?.ok === false && capturePanelState?.job.id === job.id) {
+              renderCaptureJob({ ...job, status: "failed", error: response.error });
+            }
+          })
+          .catch(() => {
+            if (capturePanelState?.job.id === job.id) {
+              renderCaptureJob({ ...job, status: "failed", error: "Connection lost. Please try again." });
+            }
+          })
+          .finally(() => startedCaptureJobs.delete(job.id));
       }, 0);
     }
   }
 
   function handleMessage(request, _sender, sendResponse) {
     if (request?.type === "EXTRACT_BASE_PROFILE") {
-      sendResponse({ ok: true, profile: extractBaseProfile(request.settings) });
-      return;
+      extractBaseProfile(request.settings)
+        .then((profile) => sendResponse({ ok: true, profile }))
+        .catch((error) => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
 
     if (request?.type === "EXTRACT_DETAIL_SECTION") {
-      sendResponse({ ok: true, text: extractDetailSection(request.sectionKey) });
-      return;
+      extractDetailSection(request.sectionKey)
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: error.message }));
+      return true;
     }
 
     if (request?.type === "SHOW_CAPTURE_PANEL") {
@@ -375,18 +446,15 @@
       return;
     }
 
+    if (request?.type === "CAPTURE_JOB_CLEARED") {
+      if (capturePanelState?.job.id === request.jobId) removeCapturePanel(false);
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (request?.type === "CAPTURE_JOB_UPDATED") {
       if (capturePanelState?.job.id === request.job.id) {
         renderCaptureJob(request.job);
-      } else if (
-        dismissedCaptureJobs.has(request.job.id)
-        && ["complete", "failed"].includes(request.job.status)
-      ) {
-        dismissedCaptureJobs.delete(request.job.id);
-        chrome.runtime.sendMessage({
-          type: "CLEAR_CAPTURE_JOB",
-          jobId: request.job.id
-        }).catch(() => undefined);
       }
       sendResponse({ ok: true });
     }
@@ -395,6 +463,6 @@
   chrome.runtime.onMessage.addListener(handleMessage);
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { cleanLines, cleanSectionText };
+    module.exports = { cleanLines, cleanSectionText, elementText, extractBaseProfile, extractDetailSection };
   }
 })();

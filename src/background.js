@@ -2,14 +2,9 @@ importScripts("shared/config.js", "shared/formatter.js");
 
 const JOB_PREFIX = "profile-copy-job:";
 const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/offscreen.html";
-const DETAIL_PATHS = {
-  experience: "experience",
-  education: "education",
-  skills: "skills",
-  certifications: "certifications",
-  projects: "projects",
-  languages: "languages"
-};
+const DETAIL_PATHS = ProfileCopyConfig.detailPaths;
+const captureStarts = new Map();
+const runningCaptures = new Map();
 const CAPTURE_DELAYS = Object.freeze({
   beforeInitialRead: { minimum: 450, maximum: 900 },
   betweenDetailPages: { minimum: 900, maximum: 1800 },
@@ -50,8 +45,9 @@ async function ensureOffscreenDocument() {
   await creatingOffscreenDocument;
 }
 
-async function copyTextOffscreen(text) {
+async function copyTextOffscreen(text, job) {
   await ensureOffscreenDocument();
+  await checkCapture(job);
   const response = await chrome.runtime.sendMessage({
     target: "offscreen",
     type: "COPY_TEXT",
@@ -67,14 +63,7 @@ function jobKey(jobId) {
   return `${JOB_PREFIX}${jobId}`;
 }
 
-function isLinkedInProfile(urlValue) {
-  try {
-    const url = new URL(urlValue);
-    return /(^|\.)linkedin\.com$/i.test(url.hostname) && /^\/in\/[^/]+/i.test(url.pathname);
-  } catch {
-    return false;
-  }
-}
+const isLinkedInProfile = ProfileCopyConfig.isProfilePage;
 
 function profileRoot(urlValue) {
   const url = new URL(urlValue);
@@ -109,12 +98,16 @@ async function setJob(jobId, value) {
 
 async function patchJob(jobId, patch) {
   const current = await getJob(jobId);
-  if (!current) {
+  if (!current || runningCaptures.get(jobId)?.cancelled) {
     throw new Error("Capture job was not found.");
   }
 
   const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
   await setJob(jobId, next);
+  if (runningCaptures.get(jobId)?.cancelled) {
+    await chrome.storage.session.remove(jobKey(jobId));
+    throw new Error("Copy cancelled.");
+  }
   await chrome.tabs.sendMessage(next.sourceTabId, {
     type: "CAPTURE_JOB_UPDATED",
     job: next
@@ -122,7 +115,34 @@ async function patchJob(jobId, patch) {
   return next;
 }
 
-async function createCaptureJob(request) {
+function createCaptureJob(request) {
+  if (!captureStarts.has(request.sourceTabId)) {
+    const pending = prepareCaptureJob(request).finally(() => captureStarts.delete(request.sourceTabId));
+    captureStarts.set(request.sourceTabId, pending);
+  }
+  return captureStarts.get(request.sourceTabId);
+}
+
+async function clearCaptureJob(jobId) {
+  const running = runningCaptures.get(jobId);
+  if (running) running.cancelled = true;
+  const job = await getJob(jobId);
+  await chrome.storage.session.remove(jobKey(jobId));
+  if (job?.detailTabId) await chrome.tabs.remove(job.detailTabId).catch(() => undefined);
+  if (job) await chrome.tabs.sendMessage(job.sourceTabId, {
+    type: "CAPTURE_JOB_CLEARED", jobId
+  }).catch(() => undefined);
+}
+
+async function checkCapture(job) {
+  const source = await chrome.tabs.get(job.sourceTabId);
+  if (runningCaptures.get(job.id)?.cancelled || !await getJob(job.id)
+    || !isLinkedInProfile(source.url) || profileRoot(source.url) !== profileRoot(job.sourceUrl)) {
+    throw new Error("Copy cancelled because the profile was closed or changed.");
+  }
+}
+
+async function prepareCaptureJob(request) {
   const sourceTab = await chrome.tabs.get(request.sourceTabId);
   if (!isLinkedInProfile(sourceTab.url)) {
     throw new Error("Open a LinkedIn profile before starting a copy.");
@@ -133,6 +153,8 @@ async function createCaptureJob(request) {
     key.startsWith(JOB_PREFIX)
     && value?.sourceTabId === sourceTab.id
     && ["ready", "running"].includes(value.status)
+    && (value.status === "ready" || runningCaptures.has(value.id))
+    && profileRoot(value.sourceUrl) === profileRoot(sourceTab.url)
   ));
 
   if (activeJob) {
@@ -143,7 +165,15 @@ async function createCaptureJob(request) {
     return { ok: true, jobId: activeJob[1].id, alreadyRunning: true };
   }
 
+  for (const [key, value] of Object.entries(storedJobs)) {
+    if (key.startsWith(JOB_PREFIX) && value?.sourceTabId === sourceTab.id) {
+      await clearCaptureJob(value.id);
+    }
+  }
   const settings = ProfileCopyConfig.normaliseSettings(request.settings);
+  if (!Object.values(settings.sections).some(Boolean) && !settings.includeProfileUrl) {
+    throw new Error("Choose at least one section or the profile URL in Settings.");
+  }
   const jobId = crypto.randomUUID();
   const job = {
     id: jobId,
@@ -152,48 +182,42 @@ async function createCaptureJob(request) {
     mode: "full",
     settings,
     sourceTabId: sourceTab.id,
+    sourceWindowId: sourceTab.windowId,
     sourceUrl: sourceTab.url,
     createdAt: new Date().toISOString(),
     warnings: []
   };
 
   await setJob(jobId, job);
-  await sendToProfileTab(sourceTab.id, {
-    type: "SHOW_CAPTURE_PANEL",
-    job
-  });
+  try {
+    await sendToProfileTab(sourceTab.id, { type: "SHOW_CAPTURE_PANEL", job });
+  } catch (error) {
+    await clearCaptureJob(jobId);
+    throw error;
+  }
 
   return { ok: true, jobId };
 }
 
 async function waitForTab(tabId, timeoutMs = 20000) {
-  const initial = await chrome.tabs.get(tabId);
-  if (initial.status === "complete") {
-    return;
+  // Polling avoids missing onUpdated between the initial read and listener setup.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await chrome.tabs.get(tabId)).status === "complete") return;
+    await sleep(200);
   }
-
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      reject(new Error("LinkedIn took too long to load a detail page."));
-    }, timeoutMs);
-
-    function onUpdated(updatedTabId, changeInfo) {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        resolve();
-      }
-    }
-
-    chrome.tabs.onUpdated.addListener(onUpdated);
-  });
+  throw new Error("LinkedIn took too long to load a detail page.");
 }
 
 async function sendToProfileTab(tabId, message) {
+  const tab = await chrome.tabs.get(tabId);
+  if (!/^https:\/\/(?:[\w-]+\.)?linkedin\.com\/in\/[^/]+(?:\/|$)/i.test(tab.url || "")) {
+    throw new Error("The LinkedIn profile page is no longer open.");
+  }
   try {
     return await chrome.tabs.sendMessage(tabId, message);
-  } catch {
+  } catch (error) {
+    if (!/receiving end does not exist|could not establish connection/i.test(error.message)) throw error;
     await chrome.scripting.insertCSS({
       target: { tabId },
       files: ["src/content/profileOverlay.css"]
@@ -220,21 +244,29 @@ function shouldUseDetail(currentText, detailText) {
   return detailScore > currentScore;
 }
 
-async function collectDetailSection(jobId, job, sectionKey, index, total) {
+async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, total) {
   const definition = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey);
+  await checkCapture(job);
   await patchJob(jobId, {
     statusText: `Loading full ${definition.label.toLowerCase()}…`,
     progress: { current: index + 1, total }
   });
 
   await pauseWithin(CAPTURE_DELAYS.betweenDetailPages);
-  const detailUrl = `${profileRoot(job.sourceUrl)}/details/${DETAIL_PATHS[sectionKey]}/`;
+  await checkCapture(job);
   let detailTab;
 
   try {
-    detailTab = await chrome.tabs.create({ active: false, url: detailUrl });
+    detailTab = await chrome.tabs.create({ active: false, url: detailUrl, windowId: job.sourceWindowId });
+    await patchJob(jobId, { detailTabId: detailTab.id });
     await waitForTab(detailTab.id);
     await pauseWithin(CAPTURE_DELAYS.afterDetailLoad);
+    await checkCapture(job);
+    const loadedTab = await chrome.tabs.get(detailTab.id);
+    const loadedUrl = new URL(loadedTab.url);
+    if (`${loadedUrl.origin}${loadedUrl.pathname.replace(/\/?$/, "/")}` !== detailUrl) {
+      throw new Error("LinkedIn redirected to a different page.");
+    }
     const response = await sendToProfileTab(detailTab.id, {
       type: "EXTRACT_DETAIL_SECTION",
       sectionKey
@@ -244,7 +276,7 @@ async function collectDetailSection(jobId, job, sectionKey, index, total) {
       throw new Error(`Could not read ${definition.label}.`);
     }
 
-    return response.text || "";
+    return response;
   } finally {
     if (detailTab?.id) {
       await chrome.tabs.remove(detailTab.id).catch(() => undefined);
@@ -252,7 +284,16 @@ async function collectDetailSection(jobId, job, sectionKey, index, total) {
   }
 }
 
-async function runCapture(jobId) {
+function runCapture(jobId) {
+  if (!runningCaptures.has(jobId)) {
+    const state = { cancelled: false };
+    runningCaptures.set(jobId, state);
+    state.promise = collectProfile(jobId).finally(() => runningCaptures.delete(jobId));
+  }
+  return runningCaptures.get(jobId).promise;
+}
+
+async function collectProfile(jobId) {
   const job = await getJob(jobId);
   if (!job) {
     throw new Error("Capture job was not found.");
@@ -266,60 +307,72 @@ async function runCapture(jobId) {
     return { ok: true, alreadyRunning: true };
   }
 
-  await patchJob(jobId, { status: "running", statusText: "Reading visible profile…" });
-
   try {
+    await checkCapture(job);
+    await patchJob(jobId, { status: "running", statusText: "Reading profile…" });
     await pauseWithin(CAPTURE_DELAYS.beforeInitialRead);
+    await checkCapture(job);
     const baseResponse = await sendToProfileTab(job.sourceTabId, {
       type: "EXTRACT_BASE_PROFILE",
       settings: job.settings
     });
 
     if (!baseResponse?.ok) {
-      throw new Error("The open LinkedIn profile could not be read.");
+      throw new Error(baseResponse?.error || "The open LinkedIn profile could not be read.");
     }
 
+    await checkCapture(job);
     const profile = baseResponse.profile;
+    if (!isLinkedInProfile(profile?.sourceUrl) || profileRoot(profile.sourceUrl) !== profileRoot(job.sourceUrl)) {
+      throw new Error("The profile changed during copying. Please try again.");
+    }
     profile.mode = job.mode;
     const warnings = [];
 
     const detailSections = Object.keys(DETAIL_PATHS).filter(
       (key) => job.settings.sections[key]
+        && profile.detailUrls?.[key] === `${profileRoot(job.sourceUrl)}/details/${DETAIL_PATHS[key]}/`
     );
 
     for (let index = 0; index < detailSections.length; index += 1) {
       const sectionKey = detailSections[index];
       try {
-        const detailText = await collectDetailSection(
+        const detail = await collectDetailSection(
           jobId,
           job,
           sectionKey,
+          profile.detailUrls[sectionKey],
           index,
           detailSections.length
         );
 
-        if (shouldUseDetail(profile.sections[sectionKey], detailText)) {
-          profile.sections[sectionKey] = detailText;
+        if (shouldUseDetail(profile.sections[sectionKey], detail.text)) {
+          profile.sections[sectionKey] = detail.text;
         }
+        if (detail.incomplete) warnings.push(ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label);
       } catch {
+        await checkCapture(job);
         const label = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey)?.label;
         warnings.push(label || sectionKey);
       }
     }
 
+    await checkCapture(job);
     let autoCopyStatus = null;
     if (job.settings.autoCopy) {
       try {
         const formattedProfile = ProfileCopyFormatter.formatProfile(profile, job.settings);
-        await copyTextOffscreen(formattedProfile);
+        await copyTextOffscreen(formattedProfile, job);
         autoCopyStatus = "copied";
       } catch {
         autoCopyStatus = "failed";
       }
     }
 
+    await checkCapture(job);
     await patchJob(jobId, {
       status: "complete",
+      detailTabId: null,
       statusText: "Profile ready",
       profile,
       warnings,
@@ -330,6 +383,9 @@ async function runCapture(jobId) {
 
     return { ok: true };
   } catch (error) {
+    if (!await getJob(jobId) || runningCaptures.get(jobId)?.cancelled) {
+      return { ok: false, error: error.message };
+    }
     await patchJob(jobId, {
       status: "failed",
       statusText: "Copy failed",
@@ -355,11 +411,28 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request?.type === "CLEAR_CAPTURE_JOB") {
-    chrome.storage.session.remove(jobKey(request.jobId))
+    clearCaptureJob(request.jobId)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
   return false;
+});
+
+async function clearTabJobs(tabId, url) {
+  const stored = await chrome.storage.session.get(null);
+  for (const [key, job] of Object.entries(stored)) {
+    if (key.startsWith(JOB_PREFIX) && job?.sourceTabId === tabId
+      && (!url || !isLinkedInProfile(url) || profileRoot(url) !== profileRoot(job.sourceUrl))) {
+      await clearCaptureJob(job.id);
+    }
+  }
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => { clearTabJobs(tabId).catch(() => undefined); });
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.url || change.status === "loading") {
+    clearTabJobs(tabId, change.status === "loading" ? null : change.url).catch(() => undefined);
+  }
 });

@@ -74,3 +74,10 @@ test("recognises a LinkedIn footer even without recommendations", () => {
     "2002 – 2006"
   ].join("\n"));
 });
+
+
+test("preserves descriptions that begin with words used in controls", () => {
+  assert.deepEqual(extractor.cleanLines("Show more empathy in product design.\nSee more opportunities through research."), [
+    "Show more empathy in product design.", "See more opportunities through research."
+  ]);
+});

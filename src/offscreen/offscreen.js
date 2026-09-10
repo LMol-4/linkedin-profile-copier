@@ -13,13 +13,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       throw new Error("Chrome blocked the automatic clipboard write.");
     }
 
-    clipboardOutput.value = "";
     sendResponse({ ok: true });
   } catch (error) {
     sendResponse({
       ok: false,
       error: error.message || "Chrome blocked the automatic clipboard write."
     });
+  } finally {
+    clipboardOutput.value = "";
   }
 
   return false;

@@ -18,19 +18,32 @@
   };
 
   function normaliseSettings(value = {}) {
+    value ||= {};
     return {
-      sections: {
-        ...defaultSettings.sections,
-        ...(value.sections || {})
-      },
+      sections: Object.fromEntries(sections.map(({ key }) => [key, value.sections?.[key] !== false])),
       includeProfileUrl: Boolean(value.includeProfileUrl),
       markdown: Boolean(value.markdown),
-      autoCopy: Boolean(value.autoCopy)
+      autoCopy: value.autoCopy === true
     };
   }
 
+  function isProfilePage(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && /(^|\.)linkedin\.com$/i.test(url.hostname)
+        && /^\/in\/[^/]+\/?$/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }
+
   const api = {
+    isProfilePage,
     sections,
+    detailPaths: {
+      experience: "experience", education: "education", skills: "skills",
+      certifications: "certifications", projects: "projects", languages: "languages"
+    },
     defaultSettings,
     normaliseSettings
   };

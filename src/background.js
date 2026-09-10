@@ -6,10 +6,10 @@ const DETAIL_PATHS = ProfileCopyConfig.detailPaths;
 const captureStarts = new Map();
 const runningCaptures = new Map();
 const CAPTURE_DELAYS = Object.freeze({
-  beforeInitialRead: { minimum: 100, maximum: 250 },
-  beforeBaseRetry: { minimum: 400, maximum: 650 },
-  betweenDetailPages: { minimum: 350, maximum: 650 },
-  afterDetailLoad: { minimum: 300, maximum: 600 }
+  beforeInitialRead: { minimum: 250, maximum: 550 },
+  beforeBaseRetry: { minimum: 450, maximum: 850 },
+  betweenDetailPages: { minimum: 550, maximum: 950 },
+  afterDetailLoad: { minimum: 450, maximum: 850 }
 });
 const MAX_BASE_PROFILE_READS = 4;
 let creatingOffscreenDocument;

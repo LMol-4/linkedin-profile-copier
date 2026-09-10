@@ -302,9 +302,11 @@
         && button.getClientRects().length > 0 && !button.disabled
         && button.getAttribute("aria-expanded") !== "true"
         && /^(?:…|\.{3})?\s*(?:(?:see|show)\s+)?more$/i.test(normaliseLine(button.textContent))) {
+        await pause(Math.max(0, Math.min(randomBetween(140, 320), deadline - Date.now())));
+        if (Date.now() >= deadline || (panel && panel !== capturePanelState)) break;
         clicked.add(button);
         button.click();
-        await pause(Math.max(0, Math.min(250 + Math.random() * 250, deadline - Date.now())));
+        await pause(Math.max(0, Math.min(randomBetween(220, 480), deadline - Date.now())));
       }
     }
   }
@@ -363,7 +365,7 @@
     for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
       content = findContent();
       if (cleanSectionText(elementText(content), key)) break;
-      await pause(300);
+      await pause(randomBetween(240, 420));
     }
     if (!content) throw new Error("The requested section has not loaded.");
 
@@ -385,12 +387,21 @@
         .some((element) => element.getClientRects().length > 0);
       const loadingMore = more && !more.disabled;
       if (Date.now() >= deadline) return { text, incomplete: true };
-      if (loadingMore) more.click();
-      content?.lastElementChild?.scrollIntoView({ block: "end" });
+      if (loadingMore) {
+        await pause(Math.min(randomBetween(320, 680), deadline - Date.now()));
+        if (Date.now() >= deadline) return { text, incomplete: true };
+        if (more.isConnected && !more.disabled) more.click();
+      }
+      content?.lastElementChild?.scrollIntoView({
+        block: Math.random() < 0.5 ? "center" : "end"
+      });
       stable = text === previous && !more && !loading ? stable + 1 : 0;
       if (text && stable >= 3) return { text, incomplete: false };
       previous = text;
-      await pause(Math.min(loadingMore ? 800 + Math.random() * 600 : 400, deadline - Date.now()));
+      await pause(Math.min(
+        loadingMore ? randomBetween(750, 1350) : randomBetween(320, 520),
+        deadline - Date.now()
+      ));
     }
     if (!previous) throw new Error("The requested section has not loaded.");
     return { text: previous, incomplete: true };

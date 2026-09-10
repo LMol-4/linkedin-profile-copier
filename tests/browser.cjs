@@ -273,25 +273,25 @@ test("spaces out description clicks and never clicks the same detail expander tw
   assert.equal(result.incomplete, false);
   const actions = await page.evaluate(() => window.actions);
   assert.deepEqual(actions.filter((action) => typeof action === "string"), ["first", "second", "load"]);
-  assert.ok(actions[1] >= 250 && actions[1] <= 500);
-  assert.ok(actions[3] >= 250 && actions[3] <= 500);
-  assert.ok(actions[5] >= 800 && actions[5] <= 1400);
+  for (const label of ["first", "second"]) {
+    const index = actions.indexOf(label);
+    assert.ok(actions[index - 1] >= 140 && actions[index - 1] <= 320);
+    assert.ok(actions[index + 1] >= 220 && actions[index + 1] <= 480);
+  }
+  const loadIndex = actions.indexOf("load");
+  assert.ok(actions[loadIndex - 1] >= 320 && actions[loadIndex - 1] <= 680);
+  assert.ok(actions[loadIndex + 1] >= 750 && actions[loadIndex + 1] <= 1350);
 });
 
 test("cancelling during an expansion delay stops further profile clicks", async (t) => {
   const page = await fixture(t, `<main>${header}<section><h2>About</h2>
-    <button class="inline-show-more-text__button" onclick="window.actions.push('first')">See more</button>
+    <button class="inline-show-more-text__button" onclick="window.actions.push('first');document.querySelector('.lpc-close').click()">See more</button>
     <button class="inline-show-more-text__button" onclick="window.actions.push('second')">See more</button>
     </section><section><h2>Experience</h2>
     <button class="inline-show-more-text__button" onclick="window.actions.push('third')">See more</button></section></main>`);
   await extract(page, { type: "SHOW_CAPTURE_PANEL", job: { id: "cancel-test", status: "running" } });
   await page.evaluate(() => {
     window.actions = [];
-    const timeout = window.setTimeout;
-    window.setTimeout = (fn, ms) => {
-      if (ms >= 250) document.querySelector('.lpc-close').click();
-      return timeout(fn, ms);
-    };
   });
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
   assert.equal(result.ok, false);

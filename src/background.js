@@ -115,7 +115,10 @@ async function patchJob(jobId, patch) {
   return next;
 }
 
-function createCaptureJob(request) {
+async function createCaptureJob(request) {
+  if (!captureStarts.has(request.sourceTabId) && captureStarts.size) {
+    throw new Error("Finish or cancel the other profile copy first.");
+  }
   if (!captureStarts.has(request.sourceTabId)) {
     const pending = prepareCaptureJob(request).finally(() => captureStarts.delete(request.sourceTabId));
     captureStarts.set(request.sourceTabId, pending);
@@ -163,6 +166,12 @@ async function prepareCaptureJob(request) {
       job: activeJob[1]
     });
     return { ok: true, jobId: activeJob[1].id, alreadyRunning: true };
+  }
+
+  if (Array.from(runningCaptures.values()).some((state) => !state.cancelled)
+    || Object.entries(storedJobs).some(([key, value]) => key.startsWith(JOB_PREFIX)
+      && value?.sourceTabId !== sourceTab.id && value?.status === "ready")) {
+    throw new Error("Finish or cancel the other profile copy first.");
   }
 
   for (const [key, value] of Object.entries(storedJobs)) {
@@ -265,7 +274,7 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     const loadedTab = await chrome.tabs.get(detailTab.id);
     const loadedUrl = new URL(loadedTab.url);
     if (`${loadedUrl.origin}${loadedUrl.pathname.replace(/\/?$/, "/")}` !== detailUrl) {
-      throw new Error("LinkedIn redirected to a different page.");
+      throw Object.assign(new Error("LinkedIn redirected to a different page."), { stopDetails: true });
     }
     const response = await sendToProfileTab(detailTab.id, {
       type: "EXTRACT_DETAIL_SECTION",
@@ -350,10 +359,11 @@ async function collectProfile(jobId) {
           profile.sections[sectionKey] = detail.text;
         }
         if (detail.incomplete) warnings.push(ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label);
-      } catch {
+      } catch (error) {
         await checkCapture(job);
-        const label = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey)?.label;
-        warnings.push(label || sectionKey);
+        const unread = error.stopDetails ? detailSections.slice(index) : [sectionKey];
+        warnings.push(...unread.map((section) => ProfileCopyConfig.sections.find(({ key }) => key === section).label));
+        if (error.stopDetails) break;
       }
     }
 

@@ -200,33 +200,36 @@
 
   const pause = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-  async function expandDescriptions(section) {
-    let expanded = false;
+  async function expandDescriptions(section, clicked = new WeakSet(), deadline = Infinity) {
+    const panel = capturePanelState;
     for (const button of section?.querySelectorAll(
       "[data-testid='expandable-text-box'] > button[data-testid='expandable-text-button'], "
       + "button.inline-show-more-text__button, button.lt-line-clamp__more, button[aria-label='see more'], "
       + ".inline-show-more-text button[aria-expanded='false']"
     ) || []) {
-      if (!button.closest(excludedContainers)
+      if (Date.now() >= deadline || (panel && panel !== capturePanelState)) break;
+      if (!clicked.has(button) && !button.closest(excludedContainers)
         && button.getClientRects().length > 0 && !button.disabled
         && button.getAttribute("aria-expanded") !== "true"
         && /^(?:…|\.{3})?\s*(?:(?:see|show)\s+)?more$/i.test(normaliseLine(button.textContent))) {
+        clicked.add(button);
         button.click();
-        expanded = true;
+        await pause(Math.max(0, Math.min(250 + Math.random() * 250, deadline - Date.now())));
       }
     }
-    if (expanded) await pause(150);
   }
 
   async function extractBaseProfile(settings = {}) {
     const selected = settings.sections || {};
     const sections = {};
     const detailUrls = {};
+    const panel = capturePanelState;
     if (!/^\/in\/[^/]+\/?$/.test(window.location.pathname) || !profileName()) {
       throw new Error("Open the main LinkedIn profile and wait for it to load.");
     }
 
     for (const key of Object.keys(sectionMeta)) {
+      if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");
       if (selected[key] === false) {
         continue;
       }
@@ -273,9 +276,10 @@
 
     let previous = "";
     let stable = 0;
+    const clicked = new WeakSet();
     for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
       content = findContent();
-      await expandDescriptions(content);
+      await expandDescriptions(content, clicked, deadline);
       const text = cleanSectionText(elementText(content), key);
       // Only list pagination buttons on a verified detail page may load more entries.
       const more = Array.from(primaryRoot()?.querySelectorAll(
@@ -286,12 +290,14 @@
       ));
       const loading = Array.from(content?.querySelectorAll(".artdeco-loader, [aria-busy='true']") || [])
         .some((element) => element.getClientRects().length > 0);
-      if (more && !more.disabled) more.click();
+      const loadingMore = more && !more.disabled;
+      if (Date.now() >= deadline) return { text, incomplete: true };
+      if (loadingMore) more.click();
       content?.lastElementChild?.scrollIntoView({ block: "end" });
       stable = text === previous && !more && !loading ? stable + 1 : 0;
       if (text && stable >= 3) return { text, incomplete: false };
       previous = text;
-      await pause(400);
+      await pause(Math.min(loadingMore ? 800 + Math.random() * 600 : 400, deadline - Date.now()));
     }
     if (!previous) throw new Error("The requested section has not loaded.");
     return { text: previous, incomplete: true };

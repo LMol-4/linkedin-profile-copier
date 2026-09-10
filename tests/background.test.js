@@ -163,3 +163,48 @@ test("rejects non-profile pages and empty selection before creating jobs", async
   } }), /Choose at least one/);
   assert.equal(Object.keys(h.stored).length, 0);
 });
+
+
+test("only one profile can start or collect at a time", async () => {
+  let reading;
+  let resume;
+  const entered = new Promise((resolve) => { reading = resolve; });
+  const held = new Promise((resolve) => { resume = resolve; });
+  const h = setup({ onSend: async (_id, message) => {
+    if (message.type === "EXTRACT_BASE_PROFILE") { reading(); await held; }
+  } });
+  h.tabs.set(2, { id: 2, windowId: 7, url: "https://www.linkedin.com/in/someone-else/", status: "complete" });
+  const request = (sourceTabId) => ({ sourceTabId, settings: {} });
+  const [first, second] = await Promise.allSettled([
+    h.context.createCaptureJob(request(1)), h.context.createCaptureJob(request(2))
+  ]);
+  assert.equal(first.status, "fulfilled");
+  assert.equal(second.status, "rejected");
+  assert.match(second.reason.message, /Finish or cancel/);
+  await assert.rejects(h.context.createCaptureJob(request(2)), /Finish or cancel/);
+  const running = h.context.runCapture(first.value.jobId);
+  await entered;
+  try {
+    await assert.rejects(h.context.createCaptureJob(request(2)), /Finish or cancel/);
+  } finally { resume(); }
+  await running;
+  const next = await h.context.createCaptureJob(request(2));
+  assert.equal(next.ok, true);
+  assert.equal(h.created.length, 1);
+});
+
+test("a checkpoint redirect stops all remaining detail tabs and preserves available text", async () => {
+  const h = setup({ redirect: "https://www.linkedin.com/checkpoint/challenge/", profile: {
+    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer", skills: "Planning" },
+    detailUrls: { experience: `${sourceUrl}details/experience/`, skills: `${sourceUrl}details/skills/` }
+  } });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  const result = h.stored[key(job.jobId)];
+  assert.equal(h.created.length, 1);
+  assert.equal(h.removed.length, 1);
+  assert.equal(result.status, "complete");
+  assert.deepEqual(result.warnings, ["Experience", "Skills"]);
+  assert.deepEqual(result.profile.sections, { experience: "Engineer", skills: "Planning" });
+  assert.equal(h.messages.some((message) => message.type === "EXTRACT_DETAIL_SECTION"), false);
+});

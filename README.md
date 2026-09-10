@@ -20,6 +20,10 @@ The popup shows progress. You can close the popup while collection continues. **
 
 The extension expands supported “see more” descriptions. It opens a temporary inactive tab only for an enabled section with a matching “Show all” link on that profile, then expands descriptions and loads more entries there. Your profile stays selected. If LinkedIn redirects, fails to load, or reaches the collection limit, the result shows a warning and keeps the available text. Detail reads are bounded to 15 seconds and 20 loading passes per section.
 
+Collection runs one profile at a time. Description clicks are spaced 250–500 ms apart, and loading more entries waits 800–1,400 ms between requests. Existing delays between detail pages remain in place. A redirect stops further detail-page collection and keeps the available text with a warning.
+
+These delays reduce bursts of activity; they do not make scraping undetectable or prevent account restrictions. [LinkedIn prohibits scraping extensions](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibited-software-and-extensions?lang=en), including tools that copy profiles. If avoiding account restrictions is essential, do not use this extension on LinkedIn.
+
 ### Settings
 
 Settings is always accessible in the popup, including when automatic start is enabled.

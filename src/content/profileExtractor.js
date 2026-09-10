@@ -313,10 +313,10 @@
     panel.innerHTML = `
       <header class="lpc-header">
         <div>
-          <span class="lpc-eyebrow">LinkedIn Profile Copier</span>
+          <span class="lpc-eyebrow">LinkedIn Profile Scraper</span>
           <strong data-lpc-title>Full profile copy</strong>
         </div>
-        <button class="lpc-close" type="button" aria-label="Close profile copier">×</button>
+        <button class="lpc-close" type="button" aria-label="Close LinkedIn Profile Scraper">×</button>
       </header>
       <div class="lpc-body">
         <div class="lpc-loading" data-lpc-loading>
@@ -358,7 +358,7 @@
     const warning = panel.querySelector("[data-lpc-warning]");
     const close = panel.querySelector(".lpc-close");
     close.setAttribute("aria-label", ["ready", "running"].includes(job.status)
-      ? "Cancel copy and close" : "Close profile copier");
+      ? "Cancel copy and close" : "Close LinkedIn Profile Scraper");
 
     if (job.status === "complete") {
       title.textContent = job.profile?.header?.name || "Profile ready";

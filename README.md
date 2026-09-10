@@ -1,4 +1,4 @@
-# LinkedIn Profile Copier
+# LinkedIn Profile Scraper
 
 A small Chrome extension for copying LinkedIn profile details as clean text.
 

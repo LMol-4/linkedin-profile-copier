@@ -49,8 +49,9 @@ function setup(options = {}) {
         async sendMessage(id, message) {
           messages.push(message);
           if (options.onSend) await options.onSend(id, message, context);
-          if (message.type === "EXTRACT_BASE_PROFILE") return { ok: true, profile: structuredClone(profile) };
-          if (message.type === "EXTRACT_DETAIL_SECTION") return { ok: true, text: "Engineer\nFull role description", incomplete: !!options.incomplete };
+          if (message.type === "EXTRACT_BASE_PROFILE") return { ok: true,
+            profile: structuredClone(message.expandLinkedSections && options.fallback ? options.fallback : profile) };
+          if (message.type === "EXTRACT_DETAIL_SECTION") return options.detail || { ok: true, text: "Engineer\nFull role description", incomplete: !!options.incomplete };
           return { ok: true };
         }
       }
@@ -112,6 +113,7 @@ test("closing the panel cancels collection and prevents automatic clipboard writ
   assert.equal(h.stored[key(job.jobId)], undefined);
   assert.equal(h.clipboardWrites(), 0);
   assert.equal(h.tabs.size, 1);
+  assert.equal(h.messages.some((message) => message.expandLinkedSections), false);
 });
 
 test("source navigation stops the job before opening details or copying", async () => {
@@ -239,4 +241,44 @@ test("detail warnings retain the underlying error and available profile text", a
   assert.equal(result.profile.sections.experience, "Engineer");
   assert.equal(h.created.length, 1);
   assert.equal(h.removed.length, 1);
+});
+
+
+test("successful detail reads never trigger main-profile expansion, even with identical text", async () => {
+  for (const text of ["Engineer", "Engineer\nComplete role description"]) {
+    const h = setup({ detail: { ok: true, text, incomplete: false } });
+    const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+    await h.context.runCapture(job.jobId);
+    assert.equal(h.messages.filter((message) => message.type === "EXTRACT_BASE_PROFILE").length, 1);
+    assert.deepEqual(h.stored[key(job.jobId)].warnings, []);
+    assert.equal(h.stored[key(job.jobId)].profile.sections.experience, text);
+  }
+});
+
+test("failed, empty and partial detail reads expand only the affected main-profile section", async () => {
+  const expanded = "Engineer\nFull description recovered from the main profile.";
+  for (const detail of [
+    { ok: false, error: "The requested section has not loaded." },
+    { ok: true, text: "", incomplete: false },
+    { ok: true, text: "Engineer\nPartial description", incomplete: true }
+  ]) {
+    const h = setup({ detail, fallback: { sourceUrl, sections: { experience: expanded } } });
+    const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+    await h.context.runCapture(job.jobId);
+    const fallback = h.messages.find((message) => message.expandLinkedSections);
+    assert.deepEqual(JSON.parse(JSON.stringify(fallback.settings.sections)),
+      { header: false, about: false, experience: true, education: false });
+    assert.equal(h.stored[key(job.jobId)].profile.sections.experience, expanded);
+    assert.equal(h.created.length, 1);
+    assert.equal(h.removed.length, 1);
+  }
+});
+
+test("a fallback from another profile cannot replace the available text", async () => {
+  const h = setup({ detail: { ok: false, error: "Missing details" }, fallback: {
+    sourceUrl: "https://www.linkedin.com/in/someone-else/", sections: { experience: "Another person's much longer experience" }
+  } });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer");
 });

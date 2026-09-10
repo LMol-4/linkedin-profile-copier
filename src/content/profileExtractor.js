@@ -213,7 +213,7 @@
     }
   }
 
-  async function extractBaseProfile(settings = {}) {
+  async function extractBaseProfile(settings = {}, expandLinkedSections = false) {
     const selected = settings.sections || {};
     const sections = {};
     const detailUrls = {};
@@ -229,8 +229,6 @@
       }
 
       const section = findSection(key);
-      await expandDescriptions(section);
-      sections[key] = cleanSectionText(elementText(section), key);
       const path = ProfileCopyConfig.detailPaths[key];
       for (const link of section?.querySelectorAll("a[href]") || []) {
         const url = new URL(link.href, window.location.href);
@@ -240,6 +238,8 @@
           break;
         }
       }
+      if (!detailUrls[key] || expandLinkedSections) await expandDescriptions(section);
+      sections[key] = cleanSectionText(elementText(section), key);
     }
 
     return {
@@ -462,7 +462,7 @@
 
   function handleMessage(request, _sender, sendResponse) {
     if (request?.type === "EXTRACT_BASE_PROFILE") {
-      extractBaseProfile(request.settings)
+      extractBaseProfile(request.settings, request.expandLinkedSections)
         .then((profile) => sendResponse({ ok: true, profile }))
         .catch((error) => sendResponse({ ok: false, error: error.message }));
       return true;

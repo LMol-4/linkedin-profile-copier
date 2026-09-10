@@ -337,6 +337,7 @@ async function collectProfile(jobId) {
     }
     profile.mode = job.mode;
     const warnings = [];
+    const fallbackSections = new Set();
 
     const detailSections = Object.keys(DETAIL_PATHS).filter(
       (key) => job.settings.sections[key]
@@ -358,11 +359,13 @@ async function collectProfile(jobId) {
         if (shouldUseDetail(profile.sections[sectionKey], detail.text)) {
           profile.sections[sectionKey] = detail.text;
         }
+        if (detail.incomplete || !detail.text?.trim()) fallbackSections.add(sectionKey);
         if (detail.incomplete) warnings.push(`${ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label} (loading limit reached)`);
       } catch (error) {
         await checkCapture(job);
         const unread = error.stopDetails ? detailSections.slice(index) : [sectionKey];
         warnings.push(...unread.map((section) => {
+          fallbackSections.add(section);
           const label = ProfileCopyConfig.sections.find(({ key }) => key === section).label;
           return `${label} (${error.message || "could not be read"})`;
         }));
@@ -371,6 +374,21 @@ async function collectProfile(jobId) {
     }
 
     await checkCapture(job);
+    if (fallbackSections.size) {
+      await patchJob(jobId, { statusText: "Reading available descriptions…", progress: null });
+      const fallback = await sendToProfileTab(job.sourceTabId, {
+        type: "EXTRACT_BASE_PROFILE", expandLinkedSections: true,
+        settings: { sections: Object.fromEntries(ProfileCopyConfig.sections.map(({ key }) => [key, fallbackSections.has(key)])) }
+      }).catch(() => null);
+      await checkCapture(job);
+      if (fallback?.ok && isLinkedInProfile(fallback.profile?.sourceUrl)
+        && profileRoot(fallback.profile.sourceUrl) === profileRoot(job.sourceUrl)) {
+        for (const key of fallbackSections) {
+          const text = fallback.profile.sections?.[key];
+          if (shouldUseDetail(profile.sections[key], text)) profile.sections[key] = text;
+        }
+      }
+    }
     let autoCopyStatus = null;
     if (job.settings.autoCopy) {
       try {

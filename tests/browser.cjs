@@ -205,7 +205,7 @@ test("reads the supplied SDUI structure and expands only description controls", 
   assert.equal(result.profile.sections.skills, undefined);
   assert.deepEqual(result.profile.detailUrls, { experience: "https://www.linkedin.com/in/jordan/details/experience/" });
   assert.doesNotMatch(JSON.stringify(result.profile), /preview|Unrelated|more|Contact info/);
-  assert.equal(await page.evaluate(() => window.expanded), 2);
+  assert.equal(await page.evaluate(() => window.expanded), 1);
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
@@ -235,7 +235,7 @@ test("reads SDUI profiles without a verification link and omits skill noise", as
     experience: "https://www.linkedin.com/in/jordan/details/experience/"
   });
   assert.doesNotMatch(JSON.stringify(result.profile), /preview|activity|recommendation|Contact info|She\/Her|helped me get this job/);
-  assert.equal(await page.evaluate(() => window.expanded), 2);
+  assert.equal(await page.evaluate(() => window.expanded), 1);
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
@@ -394,4 +394,33 @@ test("waits for the matching SDUI detail card and ignores other section containe
   assert.equal(result.ok, true);
   assert.equal(result.incomplete, false);
   assert.equal(result.text, "Example University\nFull qualification");
+});
+
+
+test("defers linked-section expansion and can expand just that section on fallback", async (t) => {
+  const page = await fixture(t, `<main>${header}
+    <section><h2>About</h2><p hidden id="summary">Full summary</p><button class="inline-show-more-text__button" onclick="document.querySelector('#summary').hidden=false;this.remove()">See more</button></section>
+    <section><h2>Experience</h2><p>Engineer</p><p hidden id="role-description">Full role description</p>
+      <button class="inline-show-more-text__button" onclick="document.querySelector('#role-description').hidden=false;this.remove()">See more</button>
+      <a href="/in/jordan/details/experience/">Show all</a></section>
+    <section><h2>Education</h2><p hidden id="qualification">Full qualification</p><button class="inline-show-more-text__button" onclick="document.querySelector('#qualification').hidden=false;this.remove()">See more</button></section></main>`);
+  const base = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(base.profile.sections.about, "Full summary");
+  assert.equal(base.profile.sections.experience, "Engineer");
+  assert.equal(base.profile.sections.education, "Full qualification");
+  assert.equal(await page.locator('#role-description').isVisible(), false);
+  assert.equal(base.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
+  const fallback = await extract(page, { type: "EXTRACT_BASE_PROFILE", expandLinkedSections: true,
+    settings: { sections: { header: false, about: false, experience: true, education: false } } });
+  assert.deepEqual(fallback.profile.sections, { experience: "Engineer\nFull role description" });
+  assert.equal(await page.locator('#role-description').isVisible(), true);
+});
+
+test("an unrelated Show all link cannot suppress main-profile expansion", async (t) => {
+  const page = await fixture(t, `<main>${header}<section><h2>Experience</h2><p>Engineer</p>
+    <p hidden id="full-role">Full description</p><button class="inline-show-more-text__button" onclick="document.querySelector('#full-role').hidden=false;this.remove()">See more</button>
+    <a href="/in/someone-else/details/experience/">Show all</a></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.profile.sections.experience, "Engineer\nFull description");
+  assert.deepEqual(result.profile.detailUrls, {});
 });

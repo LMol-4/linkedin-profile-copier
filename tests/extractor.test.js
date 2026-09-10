@@ -81,3 +81,13 @@ test("preserves descriptions that begin with words used in controls", () => {
     "Show more empathy in product design.", "See more opportunities through research."
   ]);
 });
+
+
+test("removes LinkedIn job badges without trimming role descriptions", () => {
+  assert.deepEqual(extractor.cleanLines([
+    "LinkedIn helped me get this job",
+    "helped me get this job",
+    "LinkedIn helped me get this job helped me get this job",
+    "LinkedIn helped me get this job through my professional network."
+  ].join("\n")), ["LinkedIn helped me get this job through my professional network."]);
+});

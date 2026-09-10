@@ -27,6 +27,7 @@
     /^company logo$/i,
     /^school logo$/i,
     /^profile photo$/i,
+    /^(?:LinkedIn )?helped me get this job(?: helped me get this job)?$/i,
     /^graphic$/i
   ];
   const sectionBoundaryPatterns = [
@@ -49,13 +50,19 @@
     return main?.querySelector("section[aria-label='Primary content']") || main;
   }
 
+  const sduiTopcard = "section[componentkey^='com.linkedin.sdui.profile.card.'][componentkey$='Topcard']";
+
   function profileName() {
     return Array.from(primaryRoot()?.querySelectorAll(
-      "h1, a[componentkey^='ProfileVerificationTriggerRef-'] h2"
+      `h1, a[componentkey^='ProfileVerificationTriggerRef-'] h2, ${sduiTopcard} h2`
     ) || []).find((heading) => {
       if (heading.closest(excludedContent)) return false;
       if (heading.tagName === "H1") return true;
-      const url = new URL(heading.closest("a").href, window.location.href);
+      const link = heading.closest("a") || heading.closest(sduiTopcard)?.querySelector(
+        "a[componentkey='topcard-logo-image-referencekey']"
+      );
+      if (!link) return false;
+      const url = new URL(link.href, window.location.href);
       return url.origin === window.location.origin
         && url.pathname.replace(/\/$/, "") === window.location.pathname.replace(/\/$/, "");
     });
@@ -119,7 +126,7 @@
     );
 
     for (const heading of headings) {
-      const headingText = normaliseLine(elementText(heading)).toLowerCase();
+      const headingText = normaliseLine(elementText(heading)).toLowerCase().replace(/\s*\(\d+\)$/, "");
       if (meta.headings.includes(headingText) && !heading.closest(excludedContent)) {
         const section = heading.closest("section, .artdeco-card");
         if (section && section !== main && main.contains(section)) return section;
@@ -143,7 +150,7 @@
       ? cleanedLines.slice(0, boundaryIndex)
       : cleanedLines;
     const lines = boundedLines.filter((line) => {
-      const lower = line.toLowerCase();
+      const lower = line.toLowerCase().replace(/\s*\(\d+\)$/, "");
       return !headings.includes(lower) && !headings.some((heading) => lower === `${heading} section`);
     });
 
@@ -163,8 +170,8 @@
       ".text-body-small.inline.t-black--light.break-words, .text-body-small.t-black--light.break-words"
     );
 
-    // The SDUI top card uses a profile-name link and a contact-info row instead of legacy classes.
-    if (nameElement.closest("a[componentkey^='ProfileVerificationTriggerRef-']")) {
+    // SDUI top cards use a name heading and a contact-info row instead of legacy classes.
+    if (nameElement.tagName === "H2") {
       const contact = card.querySelector("a[href*='/overlay/contact-info/']");
       const locationRow = contact?.closest("p")?.parentElement;
       locationElement ||= locationRow?.querySelector(":scope > p");

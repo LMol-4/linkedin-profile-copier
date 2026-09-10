@@ -216,3 +216,44 @@ test("does not use another person's verified heading as the current profile", as
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
   assert.equal(result.ok, false);
 });
+
+
+test("reads SDUI profiles without a verification link and includes counted skills", async (t) => {
+  const html = require("node:fs").readFileSync(path.join(__dirname, "fixtures/profile-sdui-unverified.html"), "utf8");
+  const page = await fixture(t, html);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.profile.header, {
+    name: "Jordan Lee", headline: "Marketing & Promotions Leader", location: "London, United Kingdom"
+  });
+  assert.equal(result.profile.sections.about, "Full summary.\nFinal summary line.");
+  assert.match(result.profile.sections.experience, /Full role description.\nFinal role line./);
+  assert.match(result.profile.sections.education, /Example University/);
+  assert.match(result.profile.sections.skills, /Sales & Marketing/);
+  assert.match(result.profile.sections.skills, /Forecasting/);
+  assert.doesNotMatch(result.profile.sections.skills, /Skills \(50\)/);
+  assert.deepEqual(result.profile.detailUrls, {
+    experience: "https://www.linkedin.com/in/jordan/details/experience/",
+    skills: "https://www.linkedin.com/in/jordan/details/skills/"
+  });
+  assert.doesNotMatch(JSON.stringify(result.profile), /preview|activity|recommendation|Contact info|She\/Her|helped me get this job/);
+  assert.equal(await page.evaluate(() => window.expanded), 2);
+  assert.equal(await page.evaluate(() => !!window.badClick), false);
+});
+
+test("finds counted section headings without copying the heading", async (t) => {
+  const page = await fixture(t, `<main>${header}<section><h2>Skills (50)</h2><p>Forecasting</p>
+    <a href="/in/jordan/details/skills/">Show all</a></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.profile.sections.skills, "Forecasting");
+  assert.equal(result.profile.detailUrls.skills, "https://www.linkedin.com/in/jordan/details/skills/");
+});
+
+test("rejects another person's unverified top card", async (t) => {
+  const page = await fixture(t, `<main><section aria-label="Primary content">
+    <section componentkey="com.linkedin.sdui.profile.card.refOTHERTopcard">
+      <a href="/in/someone-else/" componentkey="topcard-logo-image-referencekey"></a><h2>Someone else</h2>
+    </section></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, false);
+});

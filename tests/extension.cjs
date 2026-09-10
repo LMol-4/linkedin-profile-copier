@@ -4,7 +4,7 @@ const { chromium } = require("playwright");
 const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 
-test("loaded extension collects, closes detail tabs, injects after SPA navigation, and cancels", { timeout: 30000 }, async (t) => {
+for (const layout of ["legacy", "SDUI"]) test(`loaded extension collects ${layout} details, closes tabs, injects after SPA navigation, and cancels`, { timeout: 30000 }, async (t) => {
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium", headless: true,
     args: [`--disable-extensions-except=${root}`, `--load-extension=${root}`, "--host-resolver-rules=MAP www.linkedin.com ~NOTFOUND"]
@@ -14,10 +14,11 @@ test("loaded extension collects, closes detail tabs, injects after SPA navigatio
     const url = route.request().url();
     if (!url.startsWith("https://www.linkedin.com/")) return route.abort();
     const body = url.includes("/details/experience/")
-      ? `<main><h1>Experience</h1><div class="pvs-list__container"><p>Engineer at Company</p>
+      ? (layout === "SDUI" ? require("node:fs").readFileSync(path.join(__dirname, "fixtures/experience-sdui.html"), "utf8")
+        : `<main><h1>Experience</h1><div class="pvs-list__container"><p>Engineer at Company</p>
           <p hidden id="more">Full experience description</p>
           <button class="inline-show-more-text__button" onclick="document.querySelector('#more').hidden=false;this.remove()">See more</button>
-        </div><aside>My own profile preview</aside></main>`
+        </div><aside>My own profile preview</aside></main>`)
       : `<main><section><h1>Jordan Lee</h1><div class="text-body-medium break-words">Engineer</div></section>
           <section><div id="experience"></div><h2>Experience</h2><p>Engineer at Company</p>
             <a href="/in/jordan/details/experience/">Show all 4 experiences</a>
@@ -48,7 +49,9 @@ test("loaded extension collects, closes detail tabs, injects after SPA navigatio
   await source.locator("[data-lpc-result]:not([hidden])").waitFor({ timeout: 15000 });
   const text = await source.locator("[data-lpc-output]").inputValue();
   assert.match(text, /^Jordan Lee/);
-  assert.match(text, /Full experience description/);
+  assert.match(text, layout === "SDUI" ? /Complete role description./ : /Full experience description/);
+  if (layout === "SDUI") assert.match(text, /Engineer\n2015 - 2017/);
+  assert.equal(await source.locator("[data-lpc-warning]").isVisible(), false);
   assert.doesNotMatch(text, /Search suggestions|My own profile preview/);
   assert.equal(created.length, 1);
   assert.equal(created[0].isClosed(), true);

@@ -257,8 +257,10 @@
       throw new Error("LinkedIn opened a different page.");
     }
     const deadline = Date.now() + 15000;
+    const detailSection = `${key[0].toUpperCase()}${key.slice(1)}DetailsSection`;
     const findContent = () => Array.from(primaryRoot()?.querySelectorAll(
-      ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
+      `[componentkey^='com.linkedin.sdui.profile.card.'][componentkey$='${detailSection}'], `
+      + ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
     ) || []).find((list) => !list.closest(excludedContent)) || findSection(key);
     let content;
     for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {

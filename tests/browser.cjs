@@ -370,3 +370,28 @@ test("expands long experience descriptions on the main profile without a Show al
   assert.deepEqual(result.profile.detailUrls, {});
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
+
+
+test("reads the supplied SDUI Experience detail layout without heading tags or expand buttons", async (t) => {
+  const html = require("node:fs").readFileSync(path.join(__dirname, "fixtures/experience-sdui.html"), "utf8");
+  const page = await fixture(t, html, "details/experience/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, ["Engineering Manager", "Example Company · Full-time", "2020 - Present",
+    "Complete role description.", "Its final sentence.", "Earlier Company", "5 years", "Senior Engineer",
+    "2017 - 2020", "Full earlier description.", "Used research skills to deliver the project.", "Engineer", "2015 - 2017"].join("\n"));
+  assert.equal(await page.evaluate(() => !!window.badClick), false);
+});
+
+test("waits for the matching SDUI detail card and ignores other section containers", async (t) => {
+  const page = await fixture(t, `<main><div componentkey="com.linkedin.sdui.profile.card.refPERSONExperienceDetailsSection">
+    <p>Wrong section role</p></div><div id="delayed"></div></main>`, "details/education/");
+  await page.evaluate(() => fixtureDelay(() => {
+    document.querySelector('#delayed').outerHTML = '<div componentkey="com.linkedin.sdui.profile.card.refPERSONEducationDetailsSection"><p>Education</p><p>Example University</p><p>Full qualification</p></div>';
+  }, 50));
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, "Example University\nFull qualification");
+});

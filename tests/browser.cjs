@@ -371,6 +371,120 @@ test("expands long experience descriptions on the main profile without a Show al
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
+test("scrolls to mount lazy profile sections before the first extraction", async (t) => {
+  const page = await fixture(t, `<main>${header}
+    <section><div id="about"></div><h2>About</h2><p>Profile summary</p></section>
+    <div style="height: 1800px"></div><div id="lazy-sections"></div></main>`);
+  await page.evaluate(() => {
+    window.lazyScrollEvents = [];
+    window.lazyScanDelays = [];
+    const randomValues = [0, 0, 0.999, 0.999];
+    Math.random = () => randomValues.shift() ?? 0.5;
+    const acceleratedTimeout = window.setTimeout;
+    window.setTimeout = (fn, milliseconds) => {
+      window.lazyScanDelays.push(milliseconds);
+      return acceleratedTimeout(fn, milliseconds);
+    };
+    addEventListener("scroll", () => {
+      window.lazyScrollEvents.push(scrollY);
+      if (scrollY < 700 || document.querySelector("#experience")) return;
+      document.querySelector("#lazy-sections").innerHTML = '<section><div id="experience"></div><h2>Experience</h2><p>Engineer at Company</p><a href="/in/jordan/details/experience/">Show all experiences</a></section>';
+    });
+  });
+  const result = await extract(page, {
+    type: "EXTRACT_BASE_PROFILE",
+    loadLazySections: true,
+    settings: { sections: { header: false, about: false, experience: true, education: false } }
+  });
+
+  const scrollState = await page.evaluate(() => ({
+    events: window.lazyScrollEvents, delays: window.lazyScanDelays,
+    scrollHeight: document.documentElement.scrollHeight, innerHeight
+  }));
+  assert.ok(scrollState.events.filter((value) => value > 0).length >= 2, JSON.stringify(scrollState));
+  assert.ok(scrollState.events.every((value) => value >= 0 && value <= scrollState.scrollHeight));
+  assert.ok(scrollState.delays.every((value) => value >= 220 && value <= 480));
+  assert.notEqual(scrollState.delays[0], scrollState.delays[1]);
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.sections.experience, "Engineer at Company");
+  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
+  assert.equal(await page.evaluate(() => window.scrollY), 0);
+});
+
+test("waits for a refreshed profile body to grow before scanning lazy sections", async (t) => {
+  const page = await fixture(t, `<main>${header}<div id="delayed-profile-body"></div>
+    <div id="delayed-sections"></div></main>`);
+  await page.evaluate(() => {
+    addEventListener("scroll", () => {
+      if (scrollY < 300 || document.querySelector("#experience")) return;
+      document.querySelector("#delayed-sections").innerHTML = '<section><div id="experience"></div><h2>Experience</h2><p>Delayed role</p><a href="/in/jordan/details/experience/">Show all experiences</a></section>';
+    });
+    fixtureDelay(() => {
+      document.querySelector("#delayed-profile-body").style.height = "1800px";
+    }, 150);
+  });
+
+  const result = await extract(page, {
+    type: "EXTRACT_BASE_PROFILE",
+    loadLazySections: true,
+    settings: { sections: { header: false, about: false, experience: true, education: false } }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.sections.experience, "Delayed role");
+  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
+  assert.equal(await page.evaluate(() => window.scrollY), 0);
+});
+
+test("scrolls when LinkedIn mounts an empty Experience placeholder", async (t) => {
+  const page = await fixture(t, `<main>${header}<div style="height: 1800px"></div>
+    <section><div id="experience"></div><h2>Experience</h2><div id="delayed-experience"></div></section></main>`);
+  await page.evaluate(() => {
+    window.placeholderScrollEvents = [];
+    addEventListener("scroll", () => {
+      window.placeholderScrollEvents.push(scrollY);
+      if (scrollY < 300 || document.querySelector("#delayed-role")) return;
+      document.querySelector("#delayed-experience").innerHTML = '<p id="delayed-role">Role loaded after scrolling</p><a href="/in/jordan/details/experience/">Show all experiences</a>';
+    });
+  });
+
+  const result = await extract(page, {
+    type: "EXTRACT_BASE_PROFILE",
+    loadLazySections: true,
+    settings: { sections: { header: false, about: false, experience: true, education: false } }
+  });
+
+  assert.ok(await page.evaluate(() => window.placeholderScrollEvents.some((value) => value >= 300)));
+  assert.equal(result.profile.sections.experience, "Role loaded after scrolling");
+  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
+});
+
+test("uses a nested profile scroll container when the window cannot scroll", async (t) => {
+  const page = await fixture(t, `<div id="profile-scroll" style="height: 500px; overflow-y: auto">
+    <main>${header}<div style="height: 1400px"></div>
+      <section><div id="experience"></div><h2>Experience</h2><div id="nested-experience"></div></section>
+    </main></div>`);
+  await page.evaluate(() => {
+    window.nestedScrollEvents = [];
+    const container = document.querySelector("#profile-scroll");
+    container.addEventListener("scroll", () => {
+      window.nestedScrollEvents.push(container.scrollTop);
+      if (container.scrollTop < 300 || document.querySelector("#nested-role")) return;
+      document.querySelector("#nested-experience").innerHTML = '<p id="nested-role">Role loaded in nested scroller</p><a href="/in/jordan/details/experience/">Show all experiences</a>';
+    });
+  });
+
+  const result = await extract(page, {
+    type: "EXTRACT_BASE_PROFILE",
+    loadLazySections: true,
+    settings: { sections: { header: false, about: false, experience: true, education: false } }
+  });
+
+  assert.ok(await page.evaluate(() => window.nestedScrollEvents.some((value) => value >= 300)));
+  assert.equal(result.profile.sections.experience, "Role loaded in nested scroller");
+  assert.equal(await page.locator("#profile-scroll").evaluate((element) => element.scrollTop), 0);
+});
+
 
 test("reads the supplied SDUI Experience detail layout without heading tags or expand buttons", async (t) => {
   const html = require("node:fs").readFileSync(path.join(__dirname, "fixtures/experience-sdui.html"), "utf8");

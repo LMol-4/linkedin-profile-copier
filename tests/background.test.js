@@ -77,6 +77,54 @@ test("concurrent starts and runs share one job and one inactive detail tab", asy
   assert.equal(h.stored[key(a.jobId)].status, "complete");
 });
 
+test("retries when LinkedIn initially renders About without work history", async () => {
+  const h = setup();
+  const send = h.context.chrome.tabs.sendMessage;
+  let baseReads = 0;
+  const lazyLoadRequests = [];
+  h.context.chrome.tabs.sendMessage = (id, message) => {
+    if (message.type !== "EXTRACT_BASE_PROFILE") return send(id, message);
+    baseReads += 1;
+    lazyLoadRequests.push(message.loadLazySections);
+    if (baseReads === 1) return Promise.resolve({ ok: true, profile: {
+      sourceUrl, header: { name: "Jordan" },
+      sections: { about: "Profile summary", experience: "", education: "" },
+      detailUrls: {}
+    } });
+    return send(id, message).then((response) => {
+      response.profile.sections.education = "University";
+      return response;
+    });
+  };
+
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+
+  assert.equal(baseReads, 2);
+  assert.deepEqual(lazyLoadRequests, [true, false]);
+  assert.equal(h.created.length, 1);
+  assert.match(h.stored[key(job.jobId)].profile.sections.experience, /Full role description/);
+});
+
+test("waits for an in-progress profile refresh before creating the capture panel", async () => {
+  const h = setup();
+  h.tabs.get(1).status = "loading";
+  const get = h.context.chrome.tabs.get;
+  let reads = 0;
+  h.context.chrome.tabs.get = async (id) => {
+    reads += 1;
+    if (reads === 3) h.tabs.get(id).status = "complete";
+    return get(id);
+  };
+
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+
+  assert.equal(job.ok, true);
+  assert.ok(reads >= 4);
+  assert.equal(h.messages[0].type, "SHOW_CAPTURE_PANEL");
+  assert.equal(h.tabs.get(1).status, "complete");
+});
+
 test("missing, disabled and unrelated detail links never open tabs", async () => {
   for (const detailUrls of [{}, { education: "https://www.linkedin.com/search/results/" },
     { education: "https://www.linkedin.com/in/me/details/education/" }]) {

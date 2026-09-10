@@ -7,9 +7,11 @@ const captureStarts = new Map();
 const runningCaptures = new Map();
 const CAPTURE_DELAYS = Object.freeze({
   beforeInitialRead: { minimum: 100, maximum: 250 },
+  beforeBaseRetry: { minimum: 400, maximum: 650 },
   betweenDetailPages: { minimum: 350, maximum: 650 },
   afterDetailLoad: { minimum: 300, maximum: 600 }
 });
+const MAX_BASE_PROFILE_READS = 4;
 let creatingOffscreenDocument;
 
 async function hasOffscreenDocument() {
@@ -146,9 +148,14 @@ async function checkCapture(job) {
 }
 
 async function prepareCaptureJob(request) {
-  const sourceTab = await chrome.tabs.get(request.sourceTabId);
+  let sourceTab = await chrome.tabs.get(request.sourceTabId);
   if (!isLinkedInProfile(sourceTab.url)) {
     throw new Error("Open a LinkedIn profile before starting a copy.");
+  }
+  await waitForTab(sourceTab.id, 20000, "the profile");
+  sourceTab = await chrome.tabs.get(sourceTab.id);
+  if (!isLinkedInProfile(sourceTab.url)) {
+    throw new Error("The LinkedIn profile changed while it was loading.");
   }
 
   const storedJobs = await chrome.storage.session.get(null);
@@ -208,14 +215,14 @@ async function prepareCaptureJob(request) {
   return { ok: true, jobId };
 }
 
-async function waitForTab(tabId, timeoutMs = 20000) {
+async function waitForTab(tabId, timeoutMs = 20000, description = "a detail page") {
   // Polling avoids missing onUpdated between the initial read and listener setup.
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if ((await chrome.tabs.get(tabId)).status === "complete") return;
     await sleep(200);
   }
-  throw new Error("LinkedIn took too long to load a detail page.");
+  throw new Error(`LinkedIn took too long to load ${description}.`);
 }
 
 async function sendToProfileTab(tabId, message) {
@@ -251,6 +258,44 @@ function shouldUseDetail(currentText, detailText) {
   const currentScore = String(currentText || "").replace(/\s/g, "").length;
   const detailScore = detailText.replace(/\s/g, "").length;
   return detailScore > currentScore;
+}
+
+function hasRequestedDetailSection(profile, settings) {
+  return Object.keys(DETAIL_PATHS).some((key) => settings.sections[key]
+    && (profile.detailUrls?.[key] || profile.sections?.[key]?.trim()));
+}
+
+async function readBaseProfile(jobId, job) {
+  let response;
+
+  for (let attempt = 0; attempt < MAX_BASE_PROFILE_READS; attempt += 1) {
+    response = await sendToProfileTab(job.sourceTabId, {
+      type: "EXTRACT_BASE_PROFILE",
+      settings: job.settings,
+      loadLazySections: attempt === 0
+    });
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "The open LinkedIn profile could not be read.");
+    }
+
+    const profile = response.profile;
+    if (!isLinkedInProfile(profile?.sourceUrl) || profileRoot(profile.sourceUrl) !== profileRoot(job.sourceUrl)) {
+      throw new Error("The profile changed during copying. Please try again.");
+    }
+
+    const requestedDetails = Object.keys(DETAIL_PATHS).some((key) => job.settings.sections[key]);
+    if (!requestedDetails || hasRequestedDetailSection(profile, job.settings)
+      || attempt === MAX_BASE_PROFILE_READS - 1) {
+      return profile;
+    }
+
+    await patchJob(jobId, { statusText: "Waiting for profile sections..." });
+    await pauseWithin(CAPTURE_DELAYS.beforeBaseRetry);
+    await checkCapture(job);
+  }
+
+  return response.profile;
 }
 
 async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, total) {
@@ -321,20 +366,8 @@ async function collectProfile(jobId) {
     await patchJob(jobId, { status: "running", statusText: "Reading profile…" });
     await pauseWithin(CAPTURE_DELAYS.beforeInitialRead);
     await checkCapture(job);
-    const baseResponse = await sendToProfileTab(job.sourceTabId, {
-      type: "EXTRACT_BASE_PROFILE",
-      settings: job.settings
-    });
-
-    if (!baseResponse?.ok) {
-      throw new Error(baseResponse?.error || "The open LinkedIn profile could not be read.");
-    }
-
+    const profile = await readBaseProfile(jobId, job);
     await checkCapture(job);
-    const profile = baseResponse.profile;
-    if (!isLinkedInProfile(profile?.sourceUrl) || profileRoot(profile.sourceUrl) !== profileRoot(job.sourceUrl)) {
-      throw new Error("The profile changed during copying. Please try again.");
-    }
     profile.mode = job.mode;
     const warnings = [];
     const fallbackSections = new Set();

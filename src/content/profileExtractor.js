@@ -193,6 +193,102 @@
   }
 
   const pause = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+  const afterPaint = () => new Promise((resolve) => window.requestAnimationFrame(
+    () => window.requestAnimationFrame(resolve)
+  ));
+  const randomBetween = (minimum, maximum) => minimum + Math.random() * (maximum - minimum);
+  const hasSectionContent = (key) => {
+    const section = findSection(key);
+    return Boolean(section && cleanSectionText(elementText(section), key));
+  };
+  const scrollMetrics = (surface) => {
+    if (surface === document.scrollingElement) {
+      return {
+        top: surface.scrollTop,
+        left: surface.scrollLeft,
+        height: Math.max(document.body?.scrollHeight || 0, document.documentElement.scrollHeight),
+        viewport: window.innerHeight
+      };
+    }
+    return {
+      top: surface.scrollTop, left: surface.scrollLeft,
+      height: surface.scrollHeight, viewport: surface.clientHeight
+    };
+  };
+
+  function profileScrollSurface() {
+    const documentSurface = document.scrollingElement || document.documentElement;
+    for (let element = primaryRoot(); element && element !== document.body; element = element.parentElement) {
+      const overflow = window.getComputedStyle(element).overflowY;
+      if (/^(?:auto|scroll|overlay)$/.test(overflow)
+        && element.scrollHeight > element.clientHeight + 2) return element;
+    }
+    return documentSurface;
+  }
+
+  function setScrollPosition(surface, left, top) {
+    surface.style.scrollBehavior = "auto";
+    if (surface === document.scrollingElement) {
+      window.scrollTo({ left, top, behavior: "instant" });
+      surface.scrollLeft = left;
+      surface.scrollTop = top;
+      return;
+    }
+    surface.scrollTo({ left, top, behavior: "instant" });
+    surface.scrollLeft = left;
+    surface.scrollTop = top;
+  }
+
+  async function loadLazyProfileSections(selected) {
+    const requested = Object.keys(ProfileCopyConfig.detailPaths)
+      .filter((key) => selected[key] !== false);
+    if (!requested.length || requested.every(hasSectionContent)) return;
+
+    const panel = capturePanelState;
+    const initialPositions = new Map();
+    let unchangedBottomPasses = 0;
+    let previousHeight = 0;
+    let previousSurface = null;
+
+    try {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");
+        if (requested.every(hasSectionContent)) break;
+
+        const surface = profileScrollSurface();
+        if (!initialPositions.has(surface)) {
+          initialPositions.set(surface, {
+            ...scrollMetrics(surface), behavior: surface.style.scrollBehavior
+          });
+        }
+        if (surface !== previousSurface) {
+          unchangedBottomPasses = 0;
+          previousHeight = 0;
+          previousSurface = surface;
+        }
+        const current = scrollMetrics(surface);
+        const maximum = Math.max(0, current.height - current.viewport);
+        // Overlapping, irregular viewport steps trigger lazy cards without a fixed scroll cadence.
+        const step = Math.max(350, Math.round(current.viewport * randomBetween(0.58, 0.86)));
+        setScrollPosition(surface, current.left, Math.min(maximum, current.top + step));
+        await Promise.all([pause(randomBetween(220, 480)), afterPaint()]);
+
+        const next = scrollMetrics(surface);
+        const atBottom = next.top + next.viewport >= next.height - 2;
+        unchangedBottomPasses = atBottom && next.height <= previousHeight
+          ? unchangedBottomPasses + 1 : 0;
+        // A freshly refreshed profile may still be header-only. Do not treat that
+        // short document as final until LinkedIn has mounted a requested section.
+        if (unchangedBottomPasses >= 3 && requested.some(hasSectionContent)) break;
+        previousHeight = next.height;
+      }
+    } finally {
+      for (const [surface, initial] of Array.from(initialPositions).reverse()) {
+        setScrollPosition(surface, initial.left, initial.top);
+        surface.style.scrollBehavior = initial.behavior;
+      }
+    }
+  }
 
   async function expandDescriptions(section, clicked = new WeakSet(), deadline = Infinity) {
     const panel = capturePanelState;
@@ -213,7 +309,7 @@
     }
   }
 
-  async function extractBaseProfile(settings = {}, expandLinkedSections = false) {
+  async function extractBaseProfile(settings = {}, expandLinkedSections = false, loadLazySections = false) {
     const selected = settings.sections || {};
     const sections = {};
     const detailUrls = {};
@@ -221,6 +317,7 @@
     if (!/^\/in\/[^/]+\/?$/.test(window.location.pathname) || !profileName()) {
       throw new Error("Open the main LinkedIn profile and wait for it to load.");
     }
+    if (loadLazySections) await loadLazyProfileSections(selected);
 
     for (const key of Object.keys(sectionMeta)) {
       if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");
@@ -462,7 +559,7 @@
 
   function handleMessage(request, _sender, sendResponse) {
     if (request?.type === "EXTRACT_BASE_PROFILE") {
-      extractBaseProfile(request.settings, request.expandLinkedSections)
+      extractBaseProfile(request.settings, request.expandLinkedSections, request.loadLazySections)
         .then((profile) => sendResponse({ ok: true, profile }))
         .catch((error) => sendResponse({ ok: false, error: error.message }));
       return true;

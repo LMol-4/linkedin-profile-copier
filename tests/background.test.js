@@ -95,7 +95,7 @@ test("redirects keep the base text and close the temporary tab", async () => {
   const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
   await h.context.runCapture(job.jobId);
   assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer");
-  assert.equal(h.stored[key(job.jobId)].warnings[0], "Experience");
+  assert.match(h.stored[key(job.jobId)].warnings[0], /Experience.*redirected/);
   assert.equal(h.messages.some((m) => m.type === "EXTRACT_DETAIL_SECTION"), false);
   assert.equal(h.removed.length, 1);
 });
@@ -149,7 +149,7 @@ test("partial details and clipboard failures remain visible to the user", async 
   const result = h.stored[key(job.jobId)];
   assert.equal(result.status, "complete");
   assert.equal(result.autoCopyStatus, "failed");
-  assert.equal(result.warnings[0], "Experience");
+  assert.match(result.warnings[0], /Experience.*loading limit reached/);
   assert.match(result.profile.sections.experience, /Full role description/);
 });
 
@@ -204,7 +204,9 @@ test("a checkpoint redirect stops all remaining detail tabs and preserves availa
   assert.equal(h.created.length, 1);
   assert.equal(h.removed.length, 1);
   assert.equal(result.status, "complete");
-  assert.deepEqual(result.warnings, ["Experience", "Education"]);
+  assert.equal(result.warnings.length, 2);
+  assert.match(result.warnings[0], /Experience.*redirected/);
+  assert.match(result.warnings[1], /Education.*redirected/);
   assert.deepEqual(result.profile.sections, { experience: "Engineer", education: "University" });
   assert.equal(h.messages.some((message) => message.type === "EXTRACT_DETAIL_SECTION"), false);
 });
@@ -221,4 +223,20 @@ test("removed sections never open detail tabs even with older saved settings", a
   await h.context.runCapture(job.jobId);
   assert.equal(h.created.length, 0);
   assert.equal(h.stored[key(job.jobId)].status, "complete");
+});
+
+
+test("detail warnings retain the underlying error and available profile text", async () => {
+  const h = setup();
+  const send = h.context.chrome.tabs.sendMessage;
+  h.context.chrome.tabs.sendMessage = (id, message) => message.type === "EXTRACT_DETAIL_SECTION"
+    ? Promise.resolve({ ok: false, error: "The requested section has not loaded." }) : send(id, message);
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  const result = h.stored[key(job.jobId)];
+  assert.equal(result.status, "complete");
+  assert.match(result.warnings[0], /Experience.*The requested section has not loaded/);
+  assert.equal(result.profile.sections.experience, "Engineer");
+  assert.equal(h.created.length, 1);
+  assert.equal(h.removed.length, 1);
 });

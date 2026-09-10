@@ -6,9 +6,9 @@ const DETAIL_PATHS = ProfileCopyConfig.detailPaths;
 const captureStarts = new Map();
 const runningCaptures = new Map();
 const CAPTURE_DELAYS = Object.freeze({
-  beforeInitialRead: { minimum: 450, maximum: 900 },
-  betweenDetailPages: { minimum: 900, maximum: 1800 },
-  afterDetailLoad: { minimum: 1500, maximum: 2900 }
+  beforeInitialRead: { minimum: 100, maximum: 250 },
+  betweenDetailPages: { minimum: 350, maximum: 650 },
+  afterDetailLoad: { minimum: 300, maximum: 600 }
 });
 let creatingOffscreenDocument;
 
@@ -282,7 +282,7 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     });
 
     if (!response?.ok) {
-      throw new Error(`Could not read ${definition.label}.`);
+      throw new Error(response?.error || `Could not read ${definition.label}.`);
     }
 
     return response;
@@ -358,11 +358,14 @@ async function collectProfile(jobId) {
         if (shouldUseDetail(profile.sections[sectionKey], detail.text)) {
           profile.sections[sectionKey] = detail.text;
         }
-        if (detail.incomplete) warnings.push(ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label);
+        if (detail.incomplete) warnings.push(`${ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label} (loading limit reached)`);
       } catch (error) {
         await checkCapture(job);
         const unread = error.stopDetails ? detailSections.slice(index) : [sectionKey];
-        warnings.push(...unread.map((section) => ProfileCopyConfig.sections.find(({ key }) => key === section).label));
+        warnings.push(...unread.map((section) => {
+          const label = ProfileCopyConfig.sections.find(({ key }) => key === section).label;
+          return `${label} (${error.message || "could not be read"})`;
+        }));
         if (error.stopDetails) break;
       }
     }

@@ -355,3 +355,18 @@ test("education details retain expanded descriptions and load additional schools
   assert.match(result.text, /Earlier College\nBachelor of Science\n2014–2018/);
   assert.doesNotMatch(result.text, /Unrelated|Show more/);
 });
+
+
+test("expands long experience descriptions on the main profile without a Show all link", async (t) => {
+  const page = await fixture(t, `<main>${header}<section><div id="experience"></div><h2>Experience</h2>
+    <p>Example Company</p><ul><li><p>Engineering Manager</p>
+      <p><span data-testid="expandable-text-box">Led the engineering team.<span hidden id="full-role"> Mentored engineers and delivered the full programme.</span><button data-testid="expandable-text-button" onclick="document.querySelector('#full-role').hidden=false;this.remove()">… more</button></span></p>
+    </li><li><p>Senior Engineer</p><p>Built the original platform.</p></li></ul>
+    <button onclick="window.badClick=true">More</button></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, true);
+  assert.match(result.profile.sections.experience, /Led the engineering team. Mentored engineers and delivered the full programme./);
+  assert.match(result.profile.sections.experience, /Senior Engineer\nBuilt the original platform./);
+  assert.deepEqual(result.profile.detailUrls, {});
+  assert.equal(await page.evaluate(() => !!window.badClick), false);
+});

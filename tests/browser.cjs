@@ -188,3 +188,31 @@ test("waits for pending pagination and ignores a title-only detail card", async 
   assert.match(result.text, /Delayed role/);
   assert.doesNotMatch(result.text, /My own profile preview/);
 });
+
+
+test("reads the supplied SDUI structure and expands only description controls", async (t) => {
+  const html = require("node:fs").readFileSync(path.join(__dirname, "fixtures/profile-sdui.html"), "utf8");
+  const page = await fixture(t, html);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE", settings: {} });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.profile.header, {
+    name: "Jordan Lee", headline: "Chief Executive Officer", location: "London, United Kingdom"
+  });
+  assert.equal(result.profile.sections.about, "A full profile summary, including its final sentence.");
+  assert.match(result.profile.sections.experience, /Full role description.\nIts final line./);
+  assert.match(result.profile.sections.experience, /Assistant General Manager/);
+  assert.match(result.profile.sections.education, /Bachelor of Science - BS, Business Administration/);
+  assert.equal(result.profile.sections.skills, "");
+  assert.deepEqual(result.profile.detailUrls, { experience: "https://www.linkedin.com/in/jordan/details/experience/" });
+  assert.doesNotMatch(JSON.stringify(result.profile), /preview|Unrelated|more|Contact info/);
+  assert.equal(await page.evaluate(() => window.expanded), 2);
+  assert.equal(await page.evaluate(() => !!window.badClick), false);
+});
+
+test("does not use another person's verified heading as the current profile", async (t) => {
+  const page = await fixture(t, `<main><section aria-label="Primary content"><section>
+    <a href="/in/someone-else/" componentkey="ProfileVerificationTriggerRef-someone-else"><h2>Someone else</h2></a>
+  </section></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, false);
+});

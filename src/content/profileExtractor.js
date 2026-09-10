@@ -44,13 +44,21 @@
   const excludedContent = `button, [role='button'], ${excludedContainers}`;
 
   function primaryRoot() {
-    return document.querySelector(".scaffold-layout__main")
+    const main = document.querySelector(".scaffold-layout__main")
       || document.querySelector("main, [role='main']");
+    return main?.querySelector("section[aria-label='Primary content']") || main;
   }
 
   function profileName() {
-    return Array.from(primaryRoot()?.querySelectorAll("h1") || [])
-      .find((heading) => !heading.closest(excludedContent));
+    return Array.from(primaryRoot()?.querySelectorAll(
+      "h1, a[componentkey^='ProfileVerificationTriggerRef-'] h2"
+    ) || []).find((heading) => {
+      if (heading.closest(excludedContent)) return false;
+      if (heading.tagName === "H1") return true;
+      const url = new URL(heading.closest("a").href, window.location.href);
+      return url.origin === window.location.origin
+        && url.pathname.replace(/\/$/, "") === window.location.pathname.replace(/\/$/, "");
+    });
   }
 
   // Read rendered profile text once, omitting controls and accessibility duplicates.
@@ -148,12 +156,25 @@
     const name = normaliseLine(elementText(nameElement));
     if (!card) return { name, headline: "", location: "" };
 
-    const headlineElement = card.querySelector(
+    let headlineElement = card.querySelector(
       ".text-body-medium.break-words, .text-body-medium[data-generated-suggestion-target]"
     );
-    const locationElement = card.querySelector(
+    let locationElement = card.querySelector(
       ".text-body-small.inline.t-black--light.break-words, .text-body-small.t-black--light.break-words"
     );
+
+    // The SDUI top card uses a profile-name link and a contact-info row instead of legacy classes.
+    if (nameElement.closest("a[componentkey^='ProfileVerificationTriggerRef-']")) {
+      const contact = card.querySelector("a[href*='/overlay/contact-info/']");
+      const locationRow = contact?.closest("p")?.parentElement;
+      locationElement ||= locationRow?.querySelector(":scope > p");
+      for (let group = nameElement.parentElement; group && group !== card; group = group.parentElement) {
+        if (contact && group.contains(contact)) {
+          headlineElement ||= group.querySelector(":scope > p");
+          break;
+        }
+      }
+    }
 
     let headline = normaliseLine(elementText(headlineElement));
     let location = normaliseLine(elementText(locationElement));
@@ -175,7 +196,8 @@
   async function expandDescriptions(section) {
     let expanded = false;
     for (const button of section?.querySelectorAll(
-      "button.inline-show-more-text__button, button.lt-line-clamp__more, button[aria-label='see more'], "
+      "[data-testid='expandable-text-box'] > button[data-testid='expandable-text-button'], "
+      + "button.inline-show-more-text__button, button.lt-line-clamp__more, button[aria-label='see more'], "
       + ".inline-show-more-text button[aria-expanded='false']"
     ) || []) {
       if (!button.closest(excludedContainers)

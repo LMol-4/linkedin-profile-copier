@@ -39,8 +39,9 @@
   ];
   const startedCaptureJobs = new Set();
   let capturePanelState = null;
-  const excludedContent = "script, style, button, [role='button'], nav, aside, footer, "
+  const excludedContainers = "script, style, nav, aside, footer, "
     + "[role='dialog'], [hidden], .visually-hidden, .sr-only, .lpc-panel";
+  const excludedContent = `button, [role='button'], ${excludedContainers}`;
 
   function primaryRoot() {
     return document.querySelector(".scaffold-layout__main")
@@ -177,7 +178,7 @@
       "button.inline-show-more-text__button, button.lt-line-clamp__more, button[aria-label='see more'], "
       + ".inline-show-more-text button[aria-expanded='false']"
     ) || []) {
-      if (!button.closest(excludedContent.replace("button, [role='button'], ", ""))
+      if (!button.closest(excludedContainers)
         && button.getClientRects().length > 0 && !button.disabled
         && button.getAttribute("aria-expanded") !== "true"
         && /^(?:…|\.{3})?\s*(?:(?:see|show)\s+)?more$/i.test(normaliseLine(button.textContent))) {
@@ -229,11 +230,12 @@
     if (!path || !window.location.pathname.replace(/\/?$/, "/").endsWith(`/details/${path}/`)) {
       throw new Error("LinkedIn opened a different page.");
     }
-    const findContent = () => findSection(key) || Array.from(primaryRoot()?.querySelectorAll(
+    const deadline = Date.now() + 15000;
+    const findContent = () => Array.from(primaryRoot()?.querySelectorAll(
       ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
-    ) || []).find((list) => !list.closest(excludedContent));
+    ) || []).find((list) => !list.closest(excludedContent)) || findSection(key);
     let content;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
       content = findContent();
       if (cleanSectionText(elementText(content), key)) break;
       await pause(300);
@@ -242,7 +244,7 @@
 
     let previous = "";
     let stable = 0;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
       content = findContent();
       await expandDescriptions(content);
       const text = cleanSectionText(elementText(content), key);
@@ -251,11 +253,13 @@
         ".pvs-list__footer-wrapper button, button.scaffold-finite-scroll__load-button"
       ) || []).find((button) => (
         /^(?:show|load) more(?: results)?$/i.test(normaliseLine(button.textContent))
-        && !button.disabled && button.getClientRects().length > 0
+        && !button.closest(excludedContainers) && button.getClientRects().length > 0
       ));
-      if (more) more.click();
+      const loading = Array.from(content?.querySelectorAll(".artdeco-loader, [aria-busy='true']") || [])
+        .some((element) => element.getClientRects().length > 0);
+      if (more && !more.disabled) more.click();
       content?.lastElementChild?.scrollIntoView({ block: "end" });
-      stable = text === previous && !more ? stable + 1 : 0;
+      stable = text === previous && !more && !loading ? stable + 1 : 0;
       if (text && stable >= 3) return { text, incomplete: false };
       previous = text;
       await pause(400);
@@ -463,6 +467,6 @@
   chrome.runtime.onMessage.addListener(handleMessage);
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { cleanLines, cleanSectionText, elementText, extractBaseProfile, extractDetailSection };
+    module.exports = { cleanLines, cleanSectionText };
   }
 })();

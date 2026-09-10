@@ -18,6 +18,7 @@ async function fixture(t, html, suffix = "") {
     window.chrome = { runtime: { onMessage: { addListener(fn) { window.onExtensionMessage = fn; } },
       sendMessage: async () => ({ ok: true }) } };
     const nativeTimeout = window.setTimeout;
+    window.fixtureDelay = nativeTimeout;
     window.setTimeout = (fn, ms) => nativeTimeout(fn, Math.min(ms, 5));
   });
   for (const file of ["src/shared/config.js", "src/shared/formatter.js", "src/content/profileExtractor.js"]) {
@@ -91,4 +92,18 @@ test("does not extract a different detail section or expand disabled sections", 
   assert.equal(await page.evaluate(() => !!window.badClick), false);
   const detail = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "skills" });
   assert.equal(detail.ok, false);
+});
+
+test("waits for pending pagination and ignores a title-only detail card", async (t) => {
+  const page = await fixture(t, `<main><section><h1>Experience</h1></section>
+    <aside><div class="pvs-list__container">My own profile preview</div></aside>
+    <div class="pvs-list__container"><p>First role</p>
+      <div class="pvs-list__footer-wrapper"><button onclick="this.disabled=true;fixtureDelay(() => {
+        this.parentElement.insertAdjacentHTML('beforebegin','<p>Delayed role</p>');this.remove()
+      }, 60)">Show more results</button></div>
+    </div></main>`, "details/experience/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
+  assert.equal(result.ok, true);
+  assert.match(result.text, /Delayed role/);
+  assert.doesNotMatch(result.text, /My own profile preview/);
 });

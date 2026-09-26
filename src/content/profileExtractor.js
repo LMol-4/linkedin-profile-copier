@@ -47,14 +47,25 @@
 
   function profileName() {
     return Array.from(primaryRoot()?.querySelectorAll(
-      `h1, a[componentkey^='ProfileVerificationTriggerRef-'] h2, ${sduiTopcard} h2`
+      "h1, h2"
     ) || []).find((heading) => {
-      if (heading.closest(excludedContent)) return false;
+      if (heading.closest(excludedContent) || !normaliseLine(elementText(heading))) return false;
       if (heading.tagName === "H1") return true;
-      const link = heading.closest("a") || heading.closest(sduiTopcard)?.querySelector(
+      const card = heading.closest("section");
+      // Live SDUI cards now have UUID keys. Identify the name card by its
+      // profile-specific links, not the generated component key or CSS classes.
+      if (!card || card === primaryRoot()) return false;
+      const contact = card.querySelector("a[href*='/overlay/contact-info/']");
+      const link = heading.closest("a") || card.querySelector(
         "a[componentkey='topcard-logo-image-referencekey']"
       );
-      if (!link) return false;
+      if (contact && card.querySelector("h2") === heading) {
+        const contactUrl = new URL(contact.href, window.location.href);
+        const expected = `${window.location.pathname.replace(/\/$/, "")}/overlay/contact-info/`;
+        if (contactUrl.origin === window.location.origin
+          && `${contactUrl.pathname.replace(/\/$/, "")}/` === expected) return true;
+      }
+      if (!link) return Boolean(heading.closest(sduiTopcard));
       const url = new URL(link.href, window.location.href);
       return url.origin === window.location.origin
         && url.pathname.replace(/\/$/, "") === window.location.pathname.replace(/\/$/, "");
@@ -316,9 +327,22 @@
     const sections = {};
     const detailUrls = {};
     const panel = capturePanelState;
-    if (!/^\/in\/[^/]+\/?$/.test(window.location.pathname) || !profileName()) {
+    const sourceUrl = window.location.href;
+    if (!ProfileCopyConfig.isProfilePage(sourceUrl)) {
       throw new Error("Open the main LinkedIn profile and wait for it to load.");
     }
+    // Tab completion precedes LinkedIn's client-side rendering, including on SPA navigation.
+    const deadline = Date.now() + 10000;
+    while (!profileName() && Date.now() < deadline) {
+      if (window.location.href !== sourceUrl || (panel && panel !== capturePanelState)) {
+        throw new Error("The profile changed during copying. Please try again.");
+      }
+      await pause(250);
+    }
+    if (window.location.href !== sourceUrl || (panel && panel !== capturePanelState)) {
+      throw new Error("The profile changed during copying. Please try again.");
+    }
+    if (!profileName()) throw new Error("The profile is still loading. Please try again.");
     if (loadLazySections) await loadLazyProfileSections(selected);
 
     for (const key of Object.keys(sectionMeta)) {
@@ -357,10 +381,22 @@
     }
     const deadline = Date.now() + 15000;
     const detailSection = `${key[0].toUpperCase()}${key.slice(1)}DetailsSection`;
-    const findContent = () => Array.from(primaryRoot()?.querySelectorAll(
-      `[componentkey^='com.linkedin.sdui.profile.card.'][componentkey$='${detailSection}'], `
-      + ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
-    ) || []).find((list) => !list.closest(excludedContent)) || findSection(key);
+    const findContent = () => {
+      const main = primaryRoot();
+      const usable = (element) => !element.closest(excludedContent)
+        && element.getClientRects().length > 0;
+      // Prefer the entire matching card: it can contain multiple lists and schools.
+      const card = Array.from(main?.querySelectorAll(
+        `[componentkey^='com.linkedin.sdui.profile.card.'][componentkey$='${detailSection}']`
+      ) || []).find(usable);
+      if (card) return card;
+      const section = findSection(key);
+      if (section && usable(section) && cleanSectionText(elementText(section), key)) return section;
+      // Do not accept a list nested in a different SDUI detail card while ours loads.
+      return Array.from(main?.querySelectorAll(
+        ".pvs-list__container, ul.pvs-list, [data-view-name='profile-component-entity-list']"
+      ) || []).find((list) => usable(list) && !list.closest("[componentkey$='DetailsSection']"));
+    };
     let content;
     for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
       content = findContent();
@@ -377,13 +413,13 @@
       await expandDescriptions(content, clicked, deadline);
       const text = cleanSectionText(elementText(content), key);
       // Only list pagination buttons on a verified detail page may load more entries.
-      const more = Array.from(primaryRoot()?.querySelectorAll(
+      const more = Array.from(content?.querySelectorAll(
         ".pvs-list__footer-wrapper button, button.scaffold-finite-scroll__load-button"
       ) || []).find((button) => (
         /^(?:show|load) more(?: results)?$/i.test(normaliseLine(button.textContent))
         && !button.closest(excludedContainers) && button.getClientRects().length > 0
       ));
-      const loading = Array.from(content?.querySelectorAll(".artdeco-loader, [aria-busy='true']") || [])
+      const loading = content?.matches("[aria-busy='true']") || Array.from(content?.querySelectorAll(".artdeco-loader, [aria-busy='true']") || [])
         .some((element) => element.getClientRects().length > 0);
       const loadingMore = more && !more.disabled;
       if (Date.now() >= deadline) return { text, incomplete: true };

@@ -7,6 +7,13 @@ const { webcrypto } = require("node:crypto");
 const sourceUrl = "https://www.linkedin.com/in/jordan/";
 const key = (id) => `profile-copy-job:${id}`;
 
+test("accepts a profile URL with a query and no trailing slash when messaging", async () => {
+  const h = setup();
+  h.tabs.get(1).url = "https://www.linkedin.com/in/jordan?tracking=profile";
+  const response = await h.context.sendToProfileTab(1, { type: "SHOW_CAPTURE_PANEL" });
+  assert.equal(response.ok, true);
+});
+
 function setup(options = {}) {
   const stored = {};
   const tabs = new Map([[1, { id: 1, windowId: 7, url: sourceUrl, status: "complete" }]]);
@@ -38,6 +45,11 @@ function setup(options = {}) {
       tabs: {
         onUpdated: event(), onRemoved: event(),
         async get(id) { if (!tabs.has(id)) throw new Error("Tab closed"); return { ...tabs.get(id) }; },
+        async update(id, changes) {
+          if (!tabs.has(id)) throw new Error("Tab closed");
+          Object.assign(tabs.get(id), changes);
+          return { ...tabs.get(id) };
+        },
         async create(spec) {
           created.push(spec);
           const tab = { ...spec, id: created.length + 10, status: "complete" };
@@ -75,6 +87,47 @@ test("concurrent starts and runs share one job and one inactive detail tab", asy
   assert.equal(h.created[0].windowId, 7);
   assert.equal(h.removed.length, 1);
   assert.equal(h.stored[key(a.jobId)].status, "complete");
+});
+
+for (const fails of [false, true]) test(`education mounts in a visible tab and restores the source (failure=${fails})`, async () => {
+  const h = setup({ profile: {
+    sourceUrl, header: { name: "Jordan" }, sections: { education: "First school" },
+    detailUrls: { education: `${sourceUrl}details/education/` }
+  } });
+  const send = h.context.chrome.tabs.sendMessage;
+  h.context.chrome.tabs.sendMessage = async (id, message) => {
+    if (message.type === "EXTRACT_DETAIL_SECTION") {
+      assert.equal(h.tabs.get(id).active, true, "SDUI education requires a visible tab");
+      return fails ? { ok: false, error: "Unavailable" }
+        : { ok: true, text: "First school\nSecond school\nThird school", incomplete: false };
+    }
+    return send(id, message);
+  };
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.created.length, 1);
+  assert.equal(h.created[0].active, true);
+  assert.equal(h.removed.length, 1);
+  assert.equal(h.tabs.get(1).active, true);
+  const result = h.stored[key(job.jobId)];
+  assert.equal(result.status, "complete");
+  if (!fails) {
+    assert.match(result.profile.sections.education, /Third school/);
+    assert.deepEqual(result.warnings, []);
+  }
+});
+
+test("education cleanup preserves a user switch to another tab", async () => {
+  const h = setup({ profile: { sourceUrl, header: { name: "Jordan" },
+    sections: { education: "School" }, detailUrls: { education: `${sourceUrl}details/education/` } },
+    onSend(id, message) {
+      if (message.type === "EXTRACT_DETAIL_SECTION") h.tabs.get(id).active = false;
+    }
+  });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.tabs.get(1).active, undefined);
+  assert.equal(h.removed.length, 1);
 });
 
 test("retries when LinkedIn initially renders About without work history", async () => {

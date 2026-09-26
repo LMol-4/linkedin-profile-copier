@@ -227,7 +227,9 @@ async function waitForTab(tabId, timeoutMs = 20000, description = "a detail page
 
 async function sendToProfileTab(tabId, message) {
   const tab = await chrome.tabs.get(tabId);
-  if (!/^https:\/\/(?:[\w-]+\.)?linkedin\.com\/in\/[^/]+(?:\/|$)/i.test(tab.url || "")) {
+  const targetUrl = new URL(tab.url || "about:blank");
+  if (targetUrl.protocol !== "https:" || !/(^|\.)linkedin\.com$/i.test(targetUrl.hostname)
+    || !/^\/in\/[^/]+(?:\/|$)/i.test(targetUrl.pathname)) {
     throw new Error("The LinkedIn profile page is no longer open.");
   }
   try {
@@ -311,7 +313,9 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
   let detailTab;
 
   try {
-    detailTab = await chrome.tabs.create({ active: false, url: detailUrl, windowId: job.sourceWindowId });
+    // LinkedIn's SDUI education LazyColumn does not reliably mount in an
+    // inactive tab (reproduced on all three live backtest profiles).
+    detailTab = await chrome.tabs.create({ active: sectionKey === "education", url: detailUrl, windowId: job.sourceWindowId });
     await patchJob(jobId, { detailTabId: detailTab.id });
     await waitForTab(detailTab.id);
     await pauseWithin(CAPTURE_DELAYS.afterDetailLoad);
@@ -333,7 +337,11 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     return response;
   } finally {
     if (detailTab?.id) {
+      const restoreSource = sectionKey === "education"
+        && (await chrome.tabs.get(detailTab.id).catch(() => null))?.active;
       await chrome.tabs.remove(detailTab.id).catch(() => undefined);
+      // Do not steal focus back if the user switched elsewhere during capture.
+      if (restoreSource) await chrome.tabs.update(job.sourceTabId, { active: true }).catch(() => undefined);
     }
   }
 }

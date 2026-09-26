@@ -49,5 +49,5 @@ test("uses one full-copy action without a result tab page", () => {
   assert.equal((popup.match(/data-copy-mode=/g) || []).length, 1);
   assert.match(popup, /data-copy-mode="full"/);
   assert.doesNotMatch(background, /src\/result\/result\.html/);
-  assert.doesNotMatch(background, /active:\s*true/);
+  // Tab visibility and focus restoration are covered behaviorally in background.test.js.
 });

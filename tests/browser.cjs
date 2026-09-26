@@ -33,6 +33,102 @@ const extract = (page, request) => page.evaluate((request) => new Promise((resol
 const header = `<section><h1>Jordan Lee</h1><div class="text-body-medium break-words">Engineer</div>
   <span class="text-body-small t-black--light break-words">London</span></section>`;
 
+// Structure observed on Danielle Jordan, Lisa Kelly and Mark Moynihan in live
+// Chrome: UUID section keys, unlinked h2 names, and profile-specific contact URLs.
+for (const logo of ["/in/jordan/", "/", null]) test(`recognises UUID top cards with logo ${logo}`, async (t) => {
+  const page = await fixture(t, `<main><section aria-label="Primary content">
+    <section><h2>Unrelated heading</h2></section>
+    <section componentkey="6d596161-e7e7-43c6-a319-e2b4e8e4378d">
+      ${logo ? `<a componentkey="topcard-logo-image-referencekey" href="${logo}">Photo</a>` : ""}
+      <div><div><h2>Jordan Lee</h2><p>She/Her</p><p>· 1st</p></div>
+        <p>Marketing Executive</p><div><p>Ireland</p><p>·</p>
+          <p><a href="/in/jordan/overlay/contact-info/">Contact info</a></p></div></div>
+    </section></section><aside><h2>Other person</h2></aside></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.profile.header, { name: "Jordan Lee", headline: "Marketing Executive", location: "Ireland" });
+});
+
+test("UUID cards belonging to another profile cannot supply the name", async (t) => {
+  const page = await fixture(t, `<main><section componentkey="uuid-other">
+    <h2>Other Person</h2><a href="/in/other/overlay/contact-info/">Contact info</a>
+    <a componentkey="topcard-logo-image-referencekey" href="/in/other/">Photo</a>
+    </section><section componentkey="uuid-current"><h2>Jordan Lee</h2>
+    <a href="/in/jordan/overlay/contact-info/">Contact info</a></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.header.name, "Jordan Lee");
+});
+
+test("live SDUI education shape retains all three entries without lists or heading tags", async (t) => {
+  const page = await fixture(t, `<main><section aria-label="Primary content">
+    <div componentkey="com.linkedin.sdui.profile.card.refPERSONEducationDetailsSection">
+      <div data-testid="profile_EducationDetailsSection_jordan" data-component-type="LazyColumn">
+        <div style="display:contents"><div><button aria-label="Navigate back to profile main screen"></button><p>Education</p></div></div>
+        <div style="display:contents"><div componentkey="uuid-1"><p>University</p><p>MSC, Marketing Management</p><p>Grade: 2:1</p></div></div>
+        <div style="display:contents"><div componentkey="uuid-2"><p>University</p><p>Higher Diploma, Business Studies</p><p>Grade: 2:1</p></div></div>
+        <div style="display:contents"><div componentkey="uuid-3"><p>University</p><p>Bachelor of Arts</p><p>Grade: 2:1</p></div></div>
+      </div></div></section><aside>Other profiles</aside></main>`, "details/education/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, "University\nMSC, Marketing Management\nGrade: 2:1\nUniversity\nHigher Diploma, Business Studies\nGrade: 2:1\nUniversity\nBachelor of Arts\nGrade: 2:1");
+});
+
+test("waits for a profile name mounted after the document finishes loading", async (t) => {
+  const page = await fixture(t, '<main><section id="topcard"></section></main>');
+  await page.evaluate(() => fixtureDelay(() => {
+    document.querySelector('#topcard').innerHTML = '<h1>Jordan Lee</h1>';
+  }, 80));
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.header.name, "Jordan Lee");
+});
+
+test("recognises an SDUI name without requiring a verification or logo link", async (t) => {
+  const page = await fixture(t, `<main><section componentkey="com.linkedin.sdui.profile.card.refPERSONTopcard">
+    <h2>Jordan Lee</h2></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.header.name, "Jordan Lee");
+});
+
+test("does not read a different profile that appears during the loading wait", async (t) => {
+  const page = await fixture(t, '<main><section id="topcard"></section></main>');
+  await page.evaluate(() => fixtureDelay(() => {
+    history.pushState({}, "", "/in/someone-else/");
+    document.querySelector('#topcard').innerHTML = '<h1>Someone Else</h1>';
+  }, 60));
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /profile changed/);
+});
+
+test("education details prefer the complete matching card over earlier unrelated lists", async (t) => {
+  const page = await fixture(t, `<main>
+    <div componentkey="com.linkedin.sdui.profile.card.refPERSONExperienceDetailsSection">
+      <ul class="pvs-list"><li>Unrelated employer</li></ul></div>
+    <section componentkey="com.linkedin.sdui.profile.card.refPERSONEducationDetailsSection">
+      <h2>Education</h2><ul class="pvs-list"><li>First University</li></ul>
+      <ul class="pvs-list"><li>Second University<p hidden id="degree">Full degree description</p>
+        <button class="inline-show-more-text__button" onclick="document.querySelector('#degree').hidden=false;this.remove()">See more</button></li></ul>
+    </section></main>`, "details/education/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, "First University\nSecond University\nFull degree description");
+});
+
+test("legacy education details include all lists in their section", async (t) => {
+  const page = await fixture(t, `<main><section><h2>Education</h2>
+    <div class="pvs-list__container"><ul><li>First University</li></ul></div>
+    <div class="pvs-list__container"><ul><li>Earlier School</li></ul></div>
+    </section></main>`, "details/education/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "First University\nEarlier School");
+});
+
 test("copies expanded descriptions without the search UI, own preview, or duplicate text", async (t) => {
   const page = await fixture(t, `<nav><button onclick="window.badClick=true">More</button></nav>
     <aside><h1>My own profile</h1><section><div id="about"></div>My own summary</section></aside>
@@ -537,4 +633,31 @@ test("an unrelated Show all link cannot suppress main-profile expansion", async 
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
   assert.equal(result.profile.sections.experience, "Engineer\nFull description");
   assert.deepEqual(result.profile.detailUrls, {});
+});
+
+test("education waits while its matching card is busy loading additional schools", async (t) => {
+  const page = await fixture(t, `<main>
+    <section aria-busy="true" componentkey="com.linkedin.sdui.profile.card.refPERSONEducationDetailsSection">
+      <h2>Education</h2><ul><li>First University</li></ul>
+    </section></main>`, "details/education/");
+  await page.evaluate(() => {
+    // Start loading when extraction first reads the card, avoiding a race with setup.
+    const card = document.querySelector("section");
+    const original = card.querySelectorAll.bind(card);
+    let started = false;
+    card.querySelectorAll = (...args) => {
+      if (!started) {
+        started = true;
+        fixtureDelay(() => {
+          card.insertAdjacentHTML("beforeend", "<ul><li>Earlier School</li></ul>");
+          card.setAttribute("aria-busy", "false");
+        }, 60);
+      }
+      return original(...args);
+    };
+  });
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, "First University\nEarlier School");
 });

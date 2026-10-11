@@ -9,6 +9,7 @@ global.chrome = {
   }
 };
 
+require("../src/shared/config.js");
 const extractor = require("../src/content/profileExtractor.js");
 
 test("removes common LinkedIn controls and consecutive duplicates", () => {

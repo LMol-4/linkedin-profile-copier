@@ -670,3 +670,45 @@ test("education waits while its matching card is busy loading additional schools
   assert.equal(result.incomplete, false);
   assert.equal(result.text, "First University\nEarlier School");
 });
+
+test("education details scroll the page scroller to load schools behind display: contents wrappers", async (t) => {
+  const school = (n) => `<div style="height:120px"><p>School ${n}</p></div>`;
+  const page = await fixture(t, `<main style="height:300px;overflow-y:auto">
+    <div componentkey="com.linkedin.sdui.profile.card.refPERSONEducationDetailsSection">
+      <p>Education</p><div data-component-type="LazyColumn" style="display:contents">
+        ${[1, 2, 3].map(school).join("")}</div></div></main>`, "details/education/");
+  await page.evaluate((batch) => {
+    const main = document.querySelector("main");
+    const column = document.querySelector("[data-component-type='LazyColumn']");
+    let next = 4;
+    main.addEventListener("scroll", () => {
+      if (next <= 9 && main.scrollTop + main.clientHeight >= main.scrollHeight - 50) {
+        column.insertAdjacentHTML("beforeend", batch.replace(/N/g, next) + batch.replace(/N/g, next + 1) + batch.replace(/N/g, next + 2));
+        next += 3;
+      }
+    });
+  }, school("N"));
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, [...Array.from({ length: 9 }, (_, i) => `School ${i + 1}`)].join("\n"));
+});
+
+test("finds the Show all link when its profile slug differs in case", async (t) => {
+  const page = await fixture(t, `<main>${header}<section><h2>Experience</h2><p>Engineer</p>
+    <a href="/in/Jordan/details/experience">Show all 9 experiences</a></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/Jordan/details/experience/");
+});
+
+test("finds SDUI sections by card key when LinkedIn is not in English", async (t) => {
+  const card = (key, heading, body) => `<section componentkey="com.linkedin.sdui.profile.card.refPERSON${key}">
+    <h2>${heading}</h2><p>${body}</p></section>`;
+  const page = await fixture(t, `<main>${header}${card("About", "Infos", "Ingénieure à Paris")}
+    ${card("ExperienceTopLevelSection", "Expérience", "Ingénieure\nAcme")}
+    ${card("EducationTopLevelSection", "Formation", "Sorbonne")}</main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.deepEqual(result.profile.sections, {
+    about: "Ingénieure à Paris", experience: "Ingénieure\nAcme", education: "Sorbonne"
+  });
+});

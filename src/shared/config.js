@@ -36,8 +36,17 @@
     }
   }
 
+  // LinkedIn slugs are case-insensitive and may arrive percent-encoded.
+  function comparableUrl(value, base) {
+    const url = new URL(value, base);
+    let path = url.pathname;
+    try { path = decodeURI(path); } catch { /* keep the encoded path */ }
+    return `${url.origin}${path.toLowerCase().replace(/\/?$/, "/")}`;
+  }
+
   const api = {
     isProfilePage,
+    comparableUrl,
     sections,
     detailPaths: {
       experience: "experience", education: "education"

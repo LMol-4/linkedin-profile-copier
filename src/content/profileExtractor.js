@@ -7,9 +7,15 @@
   globalThis.__LINKEDIN_PROFILE_COPY_INSTALLED__ = () => Boolean(chrome.runtime?.id);
 
   const sectionMeta = {
-    about: { ids: ["about"], headings: ["about"] },
-    experience: { ids: ["experience"], headings: ["experience"] },
-    education: { ids: ["education"], headings: ["education"] }
+    about: { ids: ["about"], headings: ["about"], cardKeys: ["About", "AboutTopLevel", "AboutTopLevelSection"] },
+    experience: {
+      ids: ["experience"], headings: ["experience"],
+      cardKeys: ["Experience", "ExperienceTopLevel", "ExperienceTopLevelSection"]
+    },
+    education: {
+      ids: ["education"], headings: ["education"],
+      cardKeys: ["Education", "EducationTopLevel", "EducationTopLevelSection"]
+    }
   };
 
   const removableLinePatterns = [
@@ -44,6 +50,7 @@
     return main?.querySelector("section[aria-label='Primary content']") || main;
   }
 
+  const { comparableUrl } = ProfileCopyConfig;
   const sduiTopcard = "section[componentkey^='com.linkedin.sdui.profile.card.'][componentkey$='Topcard']";
 
   function profileName() {
@@ -61,15 +68,12 @@
         "a[componentkey='topcard-logo-image-referencekey']"
       );
       if (contact && card.querySelector("h2") === heading) {
-        const contactUrl = new URL(contact.href, window.location.href);
         const expected = `${window.location.pathname.replace(/\/$/, "")}/overlay/contact-info/`;
-        if (contactUrl.origin === window.location.origin
-          && `${contactUrl.pathname.replace(/\/$/, "")}/` === expected) return true;
+        if (comparableUrl(contact.href, window.location.href)
+          === comparableUrl(expected, window.location.href)) return true;
       }
       if (!link) return Boolean(heading.closest(sduiTopcard));
-      const url = new URL(link.href, window.location.href);
-      return url.origin === window.location.origin
-        && url.pathname.replace(/\/$/, "") === window.location.pathname.replace(/\/$/, "");
+      return comparableUrl(link.href, window.location.href) === comparableUrl(window.location.href);
     });
   }
 
@@ -126,6 +130,12 @@
       }
     }
 
+    // SDUI card keys name the section in English whatever the interface language.
+    const card = Array.from(main.querySelectorAll("section[componentkey^='com.linkedin.sdui.profile.card.']"))
+      .find((section) => meta.cardKeys.some((suffix) => section.getAttribute("componentkey").endsWith(suffix))
+        && !section.closest(excludedContent));
+    if (card) return card;
+
     const headings = main.querySelectorAll(
       "h1, h2, h3, [role='heading'], .pvs-header__title"
     );
@@ -161,6 +171,13 @@
     });
 
     return lines.join("\n").trim();
+  }
+
+  // Also drops the card's own heading, which may not be in English.
+  function sectionText(section, key) {
+    const lines = cleanSectionText(elementText(section), key).split("\n");
+    const heading = normaliseLine(elementText(section?.querySelector("h2, h3, [role='heading']")));
+    return (heading && lines[0] === heading ? lines.slice(1) : lines).join("\n");
   }
 
   function extractHeader() {
@@ -211,7 +228,7 @@
   const randomBetween = (minimum, maximum) => minimum + Math.random() * (maximum - minimum);
   const hasSectionContent = (key) => {
     const section = findSection(key);
-    return Boolean(section && cleanSectionText(elementText(section), key));
+    return Boolean(section && sectionText(section, key));
   };
   const scrollMetrics = (surface) => {
     if (surface === document.scrollingElement) {
@@ -228,9 +245,9 @@
     };
   };
 
-  function profileScrollSurface() {
+  function profileScrollSurface(start = primaryRoot()) {
     const documentSurface = document.scrollingElement || document.documentElement;
-    for (let element = primaryRoot(); element && element !== document.body; element = element.parentElement) {
+    for (let element = start; element && element !== document.body; element = element.parentElement) {
       const overflow = window.getComputedStyle(element).overflowY;
       if (/^(?:auto|scroll|overlay)$/.test(overflow)
         && element.scrollHeight > element.clientHeight + 2) return element;
@@ -357,13 +374,14 @@
       for (const link of section?.querySelectorAll("a[href]") || []) {
         const url = new URL(link.href, window.location.href);
         const expected = `${window.location.pathname.replace(/\/$/, "")}/details/${path}/`;
-        if (path && url.origin === window.location.origin && `${url.pathname.replace(/\/$/, "")}/` === expected) {
-          detailUrls[key] = `${url.origin}${expected}`;
+        if (path && comparableUrl(url.href) === comparableUrl(expected, window.location.href)) {
+          // Open LinkedIn's own spelling of the URL so it does not redirect.
+          detailUrls[key] = `${url.origin}${url.pathname.replace(/\/?$/, "/")}`;
           break;
         }
       }
       if (!detailUrls[key] || expandLinkedSections) await expandDescriptions(section);
-      sections[key] = cleanSectionText(elementText(section), key);
+      sections[key] = sectionText(section, key);
     }
 
     return {
@@ -429,10 +447,15 @@
         if (Date.now() >= deadline) return { text, incomplete: true };
         if (more.isConnected && !more.disabled) more.click();
       }
-      content?.lastElementChild?.scrollIntoView({
-        block: Math.random() < 0.5 ? "center" : "end"
-      });
-      stable = text === previous && !more && !loading ? stable + 1 : 0;
+      // Page the real scroller: scrollIntoView does nothing on display: contents wrappers.
+      const surface = profileScrollSurface(content);
+      const position = scrollMetrics(surface);
+      const atBottom = position.top + position.viewport >= position.height - 2;
+      if (!atBottom) {
+        const step = Math.round(position.viewport * randomBetween(0.58, 0.86));
+        setScrollPosition(surface, position.left, Math.min(position.height - position.viewport, position.top + step));
+      }
+      stable = text === previous && !more && !loading && atBottom ? stable + 1 : 0;
       if (text && stable >= 3) return { text, incomplete: false };
       previous = text;
       await pause(Math.min(

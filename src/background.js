@@ -508,3 +508,8 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
     clearTabJobs(tabId, change.status === "loading" ? null : change.url).catch(() => undefined);
   }
 });
+
+// A fresh worker runs nothing, so a saved running job was cut off when Chrome stopped the last worker.
+chrome.storage.session.get(null).then((stored) => Promise.all(Object.entries(stored)
+  .filter(([key, job]) => key.startsWith(JOB_PREFIX) && job?.status === "running" && !runningCaptures.has(job.id))
+  .map(([, job]) => clearCaptureJob(job.id)))).catch(() => undefined);

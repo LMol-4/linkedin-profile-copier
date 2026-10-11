@@ -15,7 +15,7 @@ test("accepts a profile URL with a query and no trailing slash when messaging", 
 });
 
 function setup(options = {}) {
-  const stored = {};
+  const stored = { ...options.stored };
   const tabs = new Map([[1, { id: 1, windowId: 7, url: sourceUrl, status: "complete" }]]);
   const created = [];
   const removed = [];
@@ -243,6 +243,14 @@ test("a new request recovers from a stopped worker and closes its orphaned tab",
   assert.notEqual(job.jobId, "stale");
   assert.equal(h.stored[key("stale")], undefined);
   assert.ok(h.removed.includes(99));
+});
+
+test("a restarted worker clears jobs its predecessor left running", async () => {
+  const h = setup({ stored: { [key("stale")]: { id: "stale", sourceTabId: 1, sourceUrl, status: "running", detailTabId: 99 } } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.stored[key("stale")], undefined);
+  assert.ok(h.removed.includes(99));
+  assert.ok(h.messages.some((message) => message.type === "CAPTURE_JOB_CLEARED"));
 });
 
 test("partial details and clipboard failures remain visible to the user", async () => {

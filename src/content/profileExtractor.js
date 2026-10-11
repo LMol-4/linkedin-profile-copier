@@ -20,7 +20,7 @@
 
   const removableLinePatterns = [
     /^(?:show|see|view) (?:more|less)$/i,
-    /^(?:show|see|view) all(?: \d+)?(?: experiences?|educations?)?$/i,
+    /^(?:show|see|view) all(?: \d+)?(?: experiences?| educations?| media)?$/i,
     /^expand (?:this )?section/i,
     /^collapse (?:this )?section/i,
     /^end of list$/i,
@@ -38,11 +38,13 @@
     /^select language$/i,
     /^linkedin corporation ©\s*\d{4}$/i
   ];
+  const DETAIL_SETTLE_MS = 2500;
   const startedCaptureJobs = new Set();
   let capturePanelState = null;
   const excludedContainers = "script, style, nav, aside, footer, "
     + "[role='dialog'], [hidden], .visually-hidden, .sr-only, .lpc-panel";
-  const excludedContent = `button, [role='button'], a[href*='/skill-associations-details'], ${excludedContainers}`;
+  // Overlay links are role skills and media attachments, not profile text.
+  const excludedContent = `button, [role='button'], a[href*='/overlay/'], ${excludedContainers}`;
 
   function primaryRoot() {
     const main = document.querySelector(".scaffold-layout__main")
@@ -268,54 +270,42 @@
     surface.scrollTop = top;
   }
 
-  async function loadLazyProfileSections(selected) {
-    const requested = Object.keys(ProfileCopyConfig.detailPaths)
-      .filter((key) => selected[key] !== false);
-    if (!requested.length || requested.every(hasSectionContent)) return;
+  // Reads down the whole profile before any details page opens, like a quick human
+  // skim, and stays at the bottom. Uneven steps, short bounces and pauses avoid a pattern.
+  async function readProfileToBottom(selected) {
+    const requested = Object.keys(sectionMeta).filter((key) => selected[key] !== false);
+    if (!requested.length) return;
 
     const panel = capturePanelState;
-    const initialPositions = new Map();
-    let unchangedBottomPasses = 0;
-    let previousHeight = 0;
-    let previousSurface = null;
+    const behaviors = new Map();
+    let previousHeight = -1;
+    let settledPasses = 0;
 
     try {
-      for (let attempt = 0; attempt < 20; attempt += 1) {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
         if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");
-        if (requested.every(hasSectionContent)) break;
-
         const surface = profileScrollSurface();
-        if (!initialPositions.has(surface)) {
-          initialPositions.set(surface, {
-            ...scrollMetrics(surface), behavior: surface.style.scrollBehavior
-          });
-        }
-        if (surface !== previousSurface) {
-          unchangedBottomPasses = 0;
-          previousHeight = 0;
-          previousSurface = surface;
-        }
+        if (!behaviors.has(surface)) behaviors.set(surface, surface.style.scrollBehavior);
         const current = scrollMetrics(surface);
         const maximum = Math.max(0, current.height - current.viewport);
-        // Overlapping, irregular viewport steps trigger lazy cards without a fixed scroll cadence.
-        const step = Math.max(350, Math.round(current.viewport * randomBetween(0.58, 0.86)));
-        setScrollPosition(surface, current.left, Math.min(maximum, current.top + step));
-        await Promise.all([pause(randomBetween(220, 480)), afterPaint()]);
+        const distance = Math.random() < 0.15
+          ? -current.viewport * randomBetween(0.1, 0.3)
+          : current.viewport * randomBetween(0.7, 1.3);
+        setScrollPosition(surface, current.left, Math.max(0, Math.min(maximum, Math.round(current.top + distance))));
+        const dwell = Math.random() < 0.1 ? randomBetween(400, 900) : randomBetween(120, 320);
+        await Promise.all([pause(dwell), afterPaint()]);
 
         const next = scrollMetrics(surface);
         const atBottom = next.top + next.viewport >= next.height - 2;
-        unchangedBottomPasses = atBottom && next.height <= previousHeight
-          ? unchangedBottomPasses + 1 : 0;
-        // A freshly refreshed profile may still be header-only. Do not treat that
-        // short document as final until LinkedIn has mounted a requested section.
-        if (unchangedBottomPasses >= 3 && requested.some(hasSectionContent)) break;
+        settledPasses = atBottom && next.height === previousHeight ? settledPasses + 1 : 0;
         previousHeight = next.height;
+        // A finished-looking page can still hold a skeleton card, so wait a little
+        // longer at the bottom for missing sections before giving up.
+        if (settledPasses >= 2 && requested.every(hasSectionContent)) break;
+        if (settledPasses >= 10) break;
       }
     } finally {
-      for (const [surface, initial] of Array.from(initialPositions).reverse()) {
-        setScrollPosition(surface, initial.left, initial.top);
-        surface.style.scrollBehavior = initial.behavior;
-      }
+      for (const [surface, behavior] of behaviors) surface.style.scrollBehavior = behavior;
     }
   }
 
@@ -340,10 +330,9 @@
     }
   }
 
-  async function extractBaseProfile(settings = {}, expandLinkedSections = false, loadLazySections = false) {
+  async function extractBaseProfile(settings = {}, expandDetailSections = false, loadLazySections = false) {
     const selected = settings.sections || {};
     const sections = {};
-    const detailUrls = {};
     const panel = capturePanelState;
     const sourceUrl = window.location.href;
     if (!ProfileCopyConfig.isProfilePage(sourceUrl)) {
@@ -361,7 +350,7 @@
       throw new Error("The profile changed during copying. Please try again.");
     }
     if (!profileName()) throw new Error("The profile is still loading. Please try again.");
-    if (loadLazySections) await loadLazyProfileSections(selected);
+    if (loadLazySections) await readProfileToBottom(selected);
 
     for (const key of Object.keys(sectionMeta)) {
       if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");
@@ -370,17 +359,8 @@
       }
 
       const section = findSection(key);
-      const path = ProfileCopyConfig.detailPaths[key];
-      for (const link of section?.querySelectorAll("a[href]") || []) {
-        const url = new URL(link.href, window.location.href);
-        const expected = `${window.location.pathname.replace(/\/$/, "")}/details/${path}/`;
-        if (path && comparableUrl(url.href) === comparableUrl(expected, window.location.href)) {
-          // Open LinkedIn's own spelling of the URL so it does not redirect.
-          detailUrls[key] = `${url.origin}${url.pathname.replace(/\/?$/, "/")}`;
-          break;
-        }
-      }
-      if (!detailUrls[key] || expandLinkedSections) await expandDescriptions(section);
+      // Sections with a details page are read there; expand them here only as a fallback.
+      if (!ProfileCopyConfig.detailPaths[key] || expandDetailSections) await expandDescriptions(section);
       sections[key] = sectionText(section, key);
     }
 
@@ -388,8 +368,7 @@
       sourceUrl: window.location.href,
       capturedAt: new Date().toISOString(),
       header: selected.header === false ? {} : extractHeader(),
-      sections,
-      detailUrls
+      sections
     };
   }
 
@@ -425,9 +404,10 @@
     if (!content) throw new Error("The requested section has not loaded.");
 
     let previous = "";
-    let stable = 0;
+    let previousShape = "";
+    let settledSince = 0;
     const clicked = new WeakSet();
-    for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
+    while (Date.now() < deadline) {
       content = findContent();
       await expandDescriptions(content, clicked, deadline);
       const text = cleanSectionText(elementText(content), key);
@@ -455,9 +435,13 @@
         const step = Math.round(position.viewport * randomBetween(0.58, 0.86));
         setScrollPosition(surface, position.left, Math.min(position.height - position.viewport, position.top + step));
       }
-      stable = text === previous && !more && !loading && atBottom ? stable + 1 : 0;
-      if (text && stable >= 3) return { text, incomplete: false };
+      // Lazy lists pause between batches with no loader, so require a quiet period at the bottom.
+      const entries = content?.querySelectorAll("[componentkey^='entity-collection-item']").length || 0;
+      const shape = `${entries}|${position.height}|${text}`;
+      settledSince = shape === previousShape && !more && !loading && atBottom ? settledSince || Date.now() : 0;
+      if (text && settledSince && Date.now() - settledSince >= DETAIL_SETTLE_MS) return { text, incomplete: false };
       previous = text;
+      previousShape = shape;
       await pause(Math.min(
         loadingMore ? randomBetween(750, 1350) : randomBetween(320, 520),
         deadline - Date.now()
@@ -630,7 +614,7 @@
 
   function handleMessage(request, _sender, sendResponse) {
     if (request?.type === "EXTRACT_BASE_PROFILE") {
-      extractBaseProfile(request.settings, request.expandLinkedSections, request.loadLazySections)
+      extractBaseProfile(request.settings, request.expandDetailSections, request.loadLazySections)
         .then((profile) => sendResponse({ ok: true, profile }))
         .catch((error) => sendResponse({ ok: false, error: error.message }));
       return true;

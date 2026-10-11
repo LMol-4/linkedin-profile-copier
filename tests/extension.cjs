@@ -48,7 +48,7 @@ for (const layout of ["legacy", "SDUI", "unavailable"]) test(`loaded extension c
     created.push(page);
     page.goto("https://www.linkedin.com/in/jordan/details/experience/").catch(() => undefined);
   });
-  await worker.evaluate((sourceTabId) => createCaptureJob({ sourceTabId, settings: {} }), sourceTabId);
+  await worker.evaluate((sourceTabId) => createCaptureJob({ sourceTabId, settings: { sections: { about: false, education: false } } }), sourceTabId);
   await source.locator("[data-lpc-result]:not([hidden])").waitFor({ timeout: 15000 });
   const text = await source.locator("[data-lpc-output]").inputValue();
   assert.match(text, /^Jordan Lee/);
@@ -66,7 +66,7 @@ for (const layout of ["legacy", "SDUI", "unavailable"]) test(`loaded extension c
   assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ active: true }))[0].url),
     "https://www.linkedin.com/in/jordan/");
 
-  const second = await worker.evaluate((sourceTabId) => createCaptureJob({ sourceTabId, settings: {} }), sourceTabId);
+  const second = await worker.evaluate((sourceTabId) => createCaptureJob({ sourceTabId, settings: { sections: { about: false, education: false } } }), sourceTabId);
   await context.waitForEvent("page", { timeout: 10000 });
   await worker.evaluate((jobId) => clearCaptureJob(jobId), second.jobId);
   await source.locator(".lpc-panel").waitFor({ state: "detached" });

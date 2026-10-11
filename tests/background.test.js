@@ -41,8 +41,7 @@ function setup(options = {}) {
   const messages = [];
   let clipboardWrites = 0;
   const profile = options.profile || {
-    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer" },
-    detailUrls: { experience: `${sourceUrl}details/experience/` }
+    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer" }
   };
   const event = () => ({ addListener() {} });
   const context = vm.createContext({
@@ -81,7 +80,7 @@ function setup(options = {}) {
           messages.push(message);
           if (options.onSend) await options.onSend(id, message, context);
           if (message.type === "EXTRACT_BASE_PROFILE") return { ok: true,
-            profile: structuredClone(message.expandLinkedSections && options.fallback ? options.fallback : profile) };
+            profile: structuredClone(message.expandDetailSections && options.fallback ? options.fallback : profile) };
           if (message.type === "EXTRACT_DETAIL_SECTION") return options.detail || { ok: true, text: "Engineer\nFull role description", incomplete: !!options.incomplete };
           return { ok: true };
         }
@@ -110,8 +109,7 @@ test("concurrent starts and runs share one job and one inactive detail tab", asy
 
 for (const fails of [false, true]) test(`education mounts in a visible tab and restores the source (failure=${fails})`, async () => {
   const h = setup({ profile: {
-    sourceUrl, header: { name: "Jordan" }, sections: { education: "First school" },
-    detailUrls: { education: `${sourceUrl}details/education/` }
+    sourceUrl, header: { name: "Jordan" }, sections: { education: "First school" }
   } });
   const send = h.context.chrome.tabs.sendMessage;
   h.context.chrome.tabs.sendMessage = async (id, message) => {
@@ -122,7 +120,7 @@ for (const fails of [false, true]) test(`education mounts in a visible tab and r
     }
     return send(id, message);
   };
-  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false, experience: false } } });
   await h.context.runCapture(job.jobId);
   assert.equal(h.created.length, 1);
   assert.equal(h.created[0].active, true);
@@ -138,7 +136,7 @@ for (const fails of [false, true]) test(`education mounts in a visible tab and r
 
 test("education cleanup preserves a user switch to another tab", async () => {
   const h = setup({ profile: { sourceUrl, header: { name: "Jordan" },
-    sections: { education: "School" }, detailUrls: { education: `${sourceUrl}details/education/` } },
+    sections: { education: "School" } },
     onSend(id, message) {
       if (message.type === "EXTRACT_DETAIL_SECTION") h.tabs.get(id).active = false;
     }
@@ -160,11 +158,10 @@ test("retries when LinkedIn initially renders About without work history", async
     lazyLoadRequests.push(message.loadLazySections);
     if (baseReads === 1) return Promise.resolve({ ok: true, profile: {
       sourceUrl, header: { name: "Jordan" },
-      sections: { about: "Profile summary", experience: "", education: "" },
-      detailUrls: {}
+      sections: { about: "Profile summary", experience: "", education: "" }
     } });
     return send(id, message).then((response) => {
-      response.profile.sections.education = "University";
+      Object.assign(response.profile.sections, { about: "Profile summary", education: "University" });
       return response;
     });
   };
@@ -174,7 +171,7 @@ test("retries when LinkedIn initially renders About without work history", async
 
   assert.equal(baseReads, 2);
   assert.deepEqual(lazyLoadRequests, [true, false]);
-  assert.equal(h.created.length, 1);
+  assert.equal(h.created.length, 2);
   assert.match(h.stored[key(job.jobId)].profile.sections.experience, /Full role description/);
 });
 
@@ -197,10 +194,37 @@ test("waits for an in-progress profile refresh before creating the capture panel
   assert.equal(h.tabs.get(1).status, "complete");
 });
 
-test("missing, disabled and unrelated detail links never open tabs", async () => {
-  for (const detailUrls of [{}, { education: "https://www.linkedin.com/search/results/" },
-    { education: "https://www.linkedin.com/in/me/details/education/" }]) {
-    const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {}, detailUrls } });
+test("opens this profile's details page even when the main page has no Show all link", async () => {
+  const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer" } } });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.deepEqual(h.created.map(({ url }) => url), [`${sourceUrl}details/experience/`]);
+  assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer\nFull role description");
+});
+
+test("a complete details read replaces a longer main-page preview", async () => {
+  const h = setup({
+    profile: { sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer\nShow all 4 media\nConference recap" } },
+    detail: { ok: true, text: "Engineer", incomplete: false }
+  });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer");
+});
+
+test("selected sections that never load are retried and then named in a warning", async () => {
+  const h = setup();
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  const result = h.stored[key(job.jobId)];
+  assert.equal(h.messages.filter((message) => message.type === "EXTRACT_BASE_PROFILE").length, 4);
+  assert.deepEqual(result.warnings, ["About (not found on the profile)", "Education (not found on the profile)"]);
+  assert.match(result.profile.sections.experience, /Full role description/);
+});
+
+test("sections missing from the main page or disabled never open details tabs", async () => {
+  {
+    const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {} } });
     const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
     await h.context.runCapture(job.jobId);
     assert.equal(h.created.length, 0);
@@ -211,15 +235,15 @@ test("missing, disabled and unrelated detail links never open tabs", async () =>
   assert.equal(h.created.length, 0);
 });
 
-test("detail links differing only in case or encoding still open and match after LinkedIn's redirect", async () => {
-  const detailUrl = "https://www.linkedin.com/in/j%C3%B3rdan/details/experience/";
+test("a details page redirected to another case or encoding of the slug still counts", async () => {
+  const detailUrl = "https://www.linkedin.com/in/J%C3%B3rdan/details/experience/";
   const h = setup({
-    redirect: "https://www.linkedin.com/in/J%C3%93RDAN/details/experience/",
+    redirect: "https://www.linkedin.com/in/j%C3%93RDAN/details/experience/",
     profile: { sourceUrl: "https://www.linkedin.com/in/J%C3%B3rdan/", header: { name: "Jordan" },
-      sections: { experience: "Engineer" }, detailUrls: { experience: detailUrl } }
+      sections: { experience: "Engineer" } }
   });
   h.tabs.get(1).url = "https://www.linkedin.com/in/J%C3%B3rdan/";
-  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false, education: false } } });
   await h.context.runCapture(job.jobId);
   assert.equal(h.created[0].url, detailUrl);
   assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer\nFull role description");
@@ -248,7 +272,7 @@ test("closing the panel cancels collection and prevents automatic clipboard writ
   assert.equal(h.stored[key(job.jobId)], undefined);
   assert.equal(h.clipboardWrites(), 0);
   assert.equal(h.tabs.size, 1);
-  assert.equal(h.messages.some((message) => message.expandLinkedSections), false);
+  assert.equal(h.messages.some((message) => message.expandDetailSections), false);
 });
 
 test("source navigation stops the job before opening details or copying", async () => {
@@ -340,10 +364,9 @@ test("only one profile can start or collect at a time", async () => {
 
 test("a checkpoint redirect stops all remaining detail tabs and preserves available text", async () => {
   const h = setup({ redirect: "https://www.linkedin.com/checkpoint/challenge/", profile: {
-    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer", education: "University" },
-    detailUrls: { experience: `${sourceUrl}details/experience/`, education: `${sourceUrl}details/education/` }
+    sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer", education: "University" }
   } });
-  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false } } });
   await h.context.runCapture(job.jobId);
   const result = h.stored[key(job.jobId)];
   assert.equal(h.created.length, 1);
@@ -359,8 +382,8 @@ test("a checkpoint redirect stops all remaining detail tabs and preserves availa
 
 test("removed sections never open detail tabs even with older saved settings", async () => {
   const removed = ["skills", "certifications", "projects", "languages"];
-  const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {},
-    detailUrls: Object.fromEntries(removed.map((section) => [section, `${sourceUrl}details/${section}/`]))
+  const h = setup({ profile: { sourceUrl, header: { name: "Jordan" },
+    sections: Object.fromEntries(removed.map((section) => [section, "Text"]))
   } });
   const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {
     sections: Object.fromEntries(removed.map((section) => [section, true]))
@@ -390,7 +413,7 @@ test("detail warnings retain the underlying error and available profile text", a
 test("successful detail reads never trigger main-profile expansion, even with identical text", async () => {
   for (const text of ["Engineer", "Engineer\nComplete role description"]) {
     const h = setup({ detail: { ok: true, text, incomplete: false } });
-    const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+    const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false, education: false } } });
     await h.context.runCapture(job.jobId);
     assert.equal(h.messages.filter((message) => message.type === "EXTRACT_BASE_PROFILE").length, 1);
     assert.deepEqual(h.stored[key(job.jobId)].warnings, []);
@@ -408,7 +431,7 @@ test("failed, empty and partial detail reads expand only the affected main-profi
     const h = setup({ detail, fallback: { sourceUrl, sections: { experience: expanded } } });
     const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
     await h.context.runCapture(job.jobId);
-    const fallback = h.messages.find((message) => message.expandLinkedSections);
+    const fallback = h.messages.find((message) => message.expandDetailSections);
     assert.deepEqual(JSON.parse(JSON.stringify(fallback.settings.sections)),
       { header: false, about: false, experience: true, education: false });
     assert.equal(h.stored[key(job.jobId)].profile.sections.experience, expanded);

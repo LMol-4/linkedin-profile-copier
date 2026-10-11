@@ -1,8 +1,16 @@
-# LinkedIn Profile Copier: copy a LinkedIn profile as clean text for ChatGPT, Claude and other AI tools
+# LinkedIn Profile Copier: a manual LinkedIn profile scraper for ChatGPT, Claude and other AI tools
 
-A free Chrome extension that copies a LinkedIn profile as clean, readable text in one click: name, headline, location, About, full work Experience and Education. Paste it straight into ChatGPT, Claude, Gemini or any other LLM as context, or into notes, a CRM or a document.
+A free Chrome extension that copies a LinkedIn profile as clean, readable text in one click: name, headline, location, About, full work Experience and Education. Think of it as a LinkedIn profile scraper for one person at a time: export the LinkedIn profile you are looking at to text, then paste it straight into ChatGPT, Claude, Gemini or any other LLM as context, or into notes, a CRM or a document.
 
 No account, no server and no API key: everything runs locally in your browser.
+
+## Manual, not automated scraping
+
+This is not a bulk LinkedIn scraper or a crawler. It only copies the profile you have open, and only when you click **Copy profile**. It does the tedious part of copying a profile by hand: scrolling, opening "Show all", clicking "see more" and cleaning up the text.
+
+- One profile at a time, started by you. No lists, searches or background crawling.
+- Reads the pages LinkedIn shows you in your own browser. No LinkedIn API calls, no stored login, no proxies.
+- Scrolls and clicks at human speed, with uneven steps and pauses rather than a fixed rhythm.
 
 ## What people use it for
 
@@ -36,7 +44,7 @@ The popup shows progress, and you can close it while collection continues. **Can
 
 ## How it works
 
-The extension first scrolls the profile until every selected section has loaded. LinkedIn's main page only shows a preview of Experience and Education, so the extension then opens each section's full details page (`/in/<name>/details/experience/`) in a temporary tab, expands descriptions, scrolls until the list stops growing, and closes the tab. Experience loads in a background tab. Education briefly selects its tab, because LinkedIn may not render education history in an inactive tab, then returns you to the profile unless you switched elsewhere.
+The extension first skims down the whole profile to the bottom, like a quick read, with uneven scroll steps, the occasional short bounce back up, and brief pauses, and it stays at the bottom when done. If a selected section is still loading, it waits there a little longer. LinkedIn's main page only shows a preview of Experience and Education, so the extension then opens each section's full details page (`/in/<name>/details/experience/`) in a temporary tab, expands descriptions, scrolls until the list stops growing, and closes the tab. Experience loads in a background tab. Education briefly selects its tab, because LinkedIn may not render education history in an inactive tab, then returns you to the profile unless you switched elsewhere.
 
 If a details page redirects, fails to load or runs out of time (15 seconds per section), the result keeps the text from the main page, with descriptions expanded, and shows a warning. Selected sections that never appear, such as a profile without an About section, are also named in the warning.
 

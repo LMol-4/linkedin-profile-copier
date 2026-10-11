@@ -211,6 +211,21 @@ test("missing, disabled and unrelated detail links never open tabs", async () =>
   assert.equal(h.created.length, 0);
 });
 
+test("detail links differing only in case or encoding still open and match after LinkedIn's redirect", async () => {
+  const detailUrl = "https://www.linkedin.com/in/j%C3%B3rdan/details/experience/";
+  const h = setup({
+    redirect: "https://www.linkedin.com/in/J%C3%93RDAN/details/experience/",
+    profile: { sourceUrl: "https://www.linkedin.com/in/J%C3%B3rdan/", header: { name: "Jordan" },
+      sections: { experience: "Engineer" }, detailUrls: { experience: detailUrl } }
+  });
+  h.tabs.get(1).url = "https://www.linkedin.com/in/J%C3%B3rdan/";
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.created[0].url, detailUrl);
+  assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer\nFull role description");
+  assert.deepEqual(h.stored[key(job.jobId)].warnings, []);
+});
+
 test("redirects keep the base text and close the temporary tab", async () => {
   const h = setup({ redirect: "https://www.linkedin.com/in/me/" });
   const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
@@ -335,8 +350,8 @@ test("a checkpoint redirect stops all remaining detail tabs and preserves availa
   assert.equal(h.removed.length, 1);
   assert.equal(result.status, "complete");
   assert.equal(result.warnings.length, 2);
-  assert.match(result.warnings[0], /Experience.*redirected/);
-  assert.match(result.warnings[1], /Education.*redirected/);
+  assert.match(result.warnings[0], /Experience.*security check/);
+  assert.match(result.warnings[1], /Education.*security check/);
   assert.deepEqual(result.profile.sections, { experience: "Engineer", education: "University" });
   assert.equal(h.messages.some((message) => message.type === "EXTRACT_DETAIL_SECTION"), false);
 });

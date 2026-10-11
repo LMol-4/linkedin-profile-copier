@@ -248,8 +248,7 @@ function shouldUseDetail(currentText, detailText) {
 }
 
 function hasRequestedDetailSection(profile, settings) {
-  return Object.keys(DETAIL_PATHS).some((key) => settings.sections[key]
-    && (profile.detailUrls?.[key] || profile.sections?.[key]?.trim()));
+  return Object.keys(DETAIL_PATHS).some((key) => settings.sections[key] && profile.sections?.[key]?.trim());
 }
 
 async function readBaseProfile(jobId, job) {
@@ -361,10 +360,11 @@ async function collectProfile(jobId) {
     const warnings = [];
     const fallbackSections = new Set();
 
+    // The main page shows a preview and does not always link to the full list.
+    const source = new URL(job.sourceUrl);
+    const sourceRoot = `${source.origin}${source.pathname.match(/^\/in\/[^/]+/)[0]}`;
     const detailSections = Object.keys(DETAIL_PATHS).filter(
-      (key) => job.settings.sections[key]
-        && profile.detailUrls?.[key]
-        && comparableUrl(profile.detailUrls[key]) === `${profileRoot(job.sourceUrl)}/details/${DETAIL_PATHS[key]}/`
+      (key) => job.settings.sections[key] && profile.sections?.[key]?.trim()
     );
 
     for (let index = 0; index < detailSections.length; index += 1) {
@@ -374,7 +374,7 @@ async function collectProfile(jobId) {
           jobId,
           job,
           sectionKey,
-          profile.detailUrls[sectionKey],
+          `${sourceRoot}/details/${DETAIL_PATHS[sectionKey]}/`,
           index,
           detailSections.length
         );
@@ -399,7 +399,7 @@ async function collectProfile(jobId) {
     if (fallbackSections.size) {
       await patchJob(jobId, { statusText: "Reading available descriptions…", progress: null });
       const fallback = await sendToProfileTab(job.sourceTabId, {
-        type: "EXTRACT_BASE_PROFILE", expandLinkedSections: true,
+        type: "EXTRACT_BASE_PROFILE", expandDetailSections: true,
         settings: { sections: Object.fromEntries(ProfileCopyConfig.sections.map(({ key }) => [key, fallbackSections.has(key)])) }
       }).catch(() => null);
       await checkCapture(job);

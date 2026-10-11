@@ -147,7 +147,6 @@ test("copies expanded descriptions without the search UI, own preview, or duplic
   assert.equal(result.ok, true);
   assert.equal(result.profile.header.name, "Jordan Lee");
   assert.equal(result.profile.sections.about, "Visible summary\nPreviously hidden description");
-  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
@@ -308,7 +307,6 @@ test("reads the supplied SDUI structure and expands only description controls", 
   assert.match(result.profile.sections.experience, /Assistant General Manager/);
   assert.match(result.profile.sections.education, /Bachelor of Science - BS, Business Administration/);
   assert.equal(result.profile.sections.skills, undefined);
-  assert.deepEqual(result.profile.detailUrls, { experience: "https://www.linkedin.com/in/jordan/details/experience/" });
   assert.doesNotMatch(JSON.stringify(result.profile), /preview|Unrelated|more|Contact info/);
   assert.equal(await page.evaluate(() => window.expanded), 1);
   assert.equal(await page.evaluate(() => !!window.badClick), false);
@@ -336,9 +334,6 @@ test("reads SDUI profiles without a verification link and omits skill noise", as
   assert.match(result.profile.sections.education, /Example University/);
   assert.equal(result.profile.sections.skills, undefined);
   assert.doesNotMatch(JSON.stringify(result.profile), /Marketing and \+2 skills|Sales & Marketing|Forecasting/);
-  assert.deepEqual(result.profile.detailUrls, {
-    experience: "https://www.linkedin.com/in/jordan/details/experience/"
-  });
   assert.doesNotMatch(JSON.stringify(result.profile), /preview|activity|recommendation|Contact info|She\/Her|helped me get this job/);
   assert.equal(await page.evaluate(() => window.expanded), 1);
   assert.equal(await page.evaluate(() => !!window.badClick), false);
@@ -349,7 +344,6 @@ test("finds counted section headings without copying the heading", async (t) => 
     <a href="/in/jordan/details/education/">Show all</a></section></main>`);
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
   assert.equal(result.profile.sections.education, "Example University");
-  assert.equal(result.profile.detailUrls.education, "https://www.linkedin.com/in/jordan/details/education/");
 });
 
 test("rejects another person's unverified top card", async (t) => {
@@ -415,7 +409,6 @@ test("removed sections are neither extracted nor expanded", async (t) => {
     sections: Object.fromEntries(removed.map((key) => [key, true]))
   } });
   assert.deepEqual(result.profile.sections, { about: "Full summary", experience: "", education: "" });
-  assert.deepEqual(result.profile.detailUrls, {});
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
@@ -462,17 +455,16 @@ test("education details retain expanded descriptions and load additional schools
 });
 
 
-test("expands long experience descriptions on the main profile without a Show all link", async (t) => {
+test("expands long experience descriptions on the main profile when falling back", async (t) => {
   const page = await fixture(t, `<main>${header}<section><div id="experience"></div><h2>Experience</h2>
     <p>Example Company</p><ul><li><p>Engineering Manager</p>
       <p><span data-testid="expandable-text-box">Led the engineering team.<span hidden id="full-role"> Mentored engineers and delivered the full programme.</span><button data-testid="expandable-text-button" onclick="document.querySelector('#full-role').hidden=false;this.remove()">… more</button></span></p>
     </li><li><p>Senior Engineer</p><p>Built the original platform.</p></li></ul>
     <button onclick="window.badClick=true">More</button></section></main>`);
-  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE", expandDetailSections: true });
   assert.equal(result.ok, true);
   assert.match(result.profile.sections.experience, /Led the engineering team. Mentored engineers and delivered the full programme./);
   assert.match(result.profile.sections.experience, /Senior Engineer\nBuilt the original platform./);
-  assert.deepEqual(result.profile.detailUrls, {});
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
@@ -512,7 +504,6 @@ test("scrolls to mount lazy profile sections before the first extraction", async
   assert.notEqual(scrollState.delays[0], scrollState.delays[1]);
   assert.equal(result.ok, true);
   assert.equal(result.profile.sections.experience, "Engineer at Company");
-  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
   assert.equal(await page.evaluate(() => window.scrollY), 0);
 });
 
@@ -537,7 +528,6 @@ test("waits for a refreshed profile body to grow before scanning lazy sections",
 
   assert.equal(result.ok, true);
   assert.equal(result.profile.sections.experience, "Delayed role");
-  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
   assert.equal(await page.evaluate(() => window.scrollY), 0);
 });
 
@@ -561,7 +551,6 @@ test("scrolls when LinkedIn mounts an empty Experience placeholder", async (t) =
 
   assert.ok(await page.evaluate(() => window.placeholderScrollEvents.some((value) => value >= 300)));
   assert.equal(result.profile.sections.experience, "Role loaded after scrolling");
-  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
 });
 
 test("uses a nested profile scroll container when the window cannot scroll", async (t) => {
@@ -616,7 +605,7 @@ test("waits for the matching SDUI detail card and ignores other section containe
 });
 
 
-test("defers linked-section expansion and can expand just that section on fallback", async (t) => {
+test("leaves Experience and Education expansion to their details pages and expands one on fallback", async (t) => {
   const page = await fixture(t, `<main>${header}
     <section><h2>About</h2><p hidden id="summary">Full summary</p><button class="inline-show-more-text__button" onclick="document.querySelector('#summary').hidden=false;this.remove()">See more</button></section>
     <section><h2>Experience</h2><p>Engineer</p><p hidden id="role-description">Full role description</p>
@@ -626,23 +615,14 @@ test("defers linked-section expansion and can expand just that section on fallba
   const base = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
   assert.equal(base.profile.sections.about, "Full summary");
   assert.equal(base.profile.sections.experience, "Engineer");
-  assert.equal(base.profile.sections.education, "Full qualification");
+  assert.equal(base.profile.sections.education, "");
   assert.equal(await page.locator('#role-description').isVisible(), false);
-  assert.equal(base.profile.detailUrls.experience, "https://www.linkedin.com/in/jordan/details/experience/");
-  const fallback = await extract(page, { type: "EXTRACT_BASE_PROFILE", expandLinkedSections: true,
+  const fallback = await extract(page, { type: "EXTRACT_BASE_PROFILE", expandDetailSections: true,
     settings: { sections: { header: false, about: false, experience: true, education: false } } });
   assert.deepEqual(fallback.profile.sections, { experience: "Engineer\nFull role description" });
   assert.equal(await page.locator('#role-description').isVisible(), true);
 });
 
-test("an unrelated Show all link cannot suppress main-profile expansion", async (t) => {
-  const page = await fixture(t, `<main>${header}<section><h2>Experience</h2><p>Engineer</p>
-    <p hidden id="full-role">Full description</p><button class="inline-show-more-text__button" onclick="document.querySelector('#full-role').hidden=false;this.remove()">See more</button>
-    <a href="/in/someone-else/details/experience/">Show all</a></section></main>`);
-  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
-  assert.equal(result.profile.sections.experience, "Engineer\nFull description");
-  assert.deepEqual(result.profile.detailUrls, {});
-});
 
 test("education waits while its matching card is busy loading additional schools", async (t) => {
   const page = await fixture(t, `<main>
@@ -694,12 +674,6 @@ test("education details scroll the page scroller to load schools behind display:
   assert.equal(result.text, [...Array.from({ length: 9 }, (_, i) => `School ${i + 1}`)].join("\n"));
 });
 
-test("finds the Show all link when its profile slug differs in case", async (t) => {
-  const page = await fixture(t, `<main>${header}<section><h2>Experience</h2><p>Engineer</p>
-    <a href="/in/Jordan/details/experience">Show all 9 experiences</a></section></main>`);
-  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
-  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/Jordan/details/experience/");
-});
 
 test("finds SDUI sections by card key when LinkedIn is not in English", async (t) => {
   const card = (key, heading, body) => `<section componentkey="com.linkedin.sdui.profile.card.refPERSON${key}">

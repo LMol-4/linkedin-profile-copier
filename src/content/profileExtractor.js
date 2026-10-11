@@ -341,10 +341,9 @@
     }
   }
 
-  async function extractBaseProfile(settings = {}, expandLinkedSections = false, loadLazySections = false) {
+  async function extractBaseProfile(settings = {}, expandDetailSections = false, loadLazySections = false) {
     const selected = settings.sections || {};
     const sections = {};
-    const detailUrls = {};
     const panel = capturePanelState;
     const sourceUrl = window.location.href;
     if (!ProfileCopyConfig.isProfilePage(sourceUrl)) {
@@ -371,17 +370,8 @@
       }
 
       const section = findSection(key);
-      const path = ProfileCopyConfig.detailPaths[key];
-      for (const link of section?.querySelectorAll("a[href]") || []) {
-        const url = new URL(link.href, window.location.href);
-        const expected = `${window.location.pathname.replace(/\/$/, "")}/details/${path}/`;
-        if (path && comparableUrl(url.href) === comparableUrl(expected, window.location.href)) {
-          // Open LinkedIn's own spelling of the URL so it does not redirect.
-          detailUrls[key] = `${url.origin}${url.pathname.replace(/\/?$/, "/")}`;
-          break;
-        }
-      }
-      if (!detailUrls[key] || expandLinkedSections) await expandDescriptions(section);
+      // Sections with a details page are read there; expand them here only as a fallback.
+      if (!ProfileCopyConfig.detailPaths[key] || expandDetailSections) await expandDescriptions(section);
       sections[key] = sectionText(section, key);
     }
 
@@ -389,8 +379,7 @@
       sourceUrl: window.location.href,
       capturedAt: new Date().toISOString(),
       header: selected.header === false ? {} : extractHeader(),
-      sections,
-      detailUrls
+      sections
     };
   }
 
@@ -631,7 +620,7 @@
 
   function handleMessage(request, _sender, sendResponse) {
     if (request?.type === "EXTRACT_BASE_PROFILE") {
-      extractBaseProfile(request.settings, request.expandLinkedSections, request.loadLazySections)
+      extractBaseProfile(request.settings, request.expandDetailSections, request.loadLazySections)
         .then((profile) => sendResponse({ ok: true, profile }))
         .catch((error) => sendResponse({ ok: false, error: error.message }));
       return true;

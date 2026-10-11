@@ -712,3 +712,16 @@ test("finds SDUI sections by card key when LinkedIn is not in English", async (t
     about: "Ingénieure à Paris", experience: "Ingénieure\nAcme", education: "Sorbonne"
   });
 });
+
+test("drops media attachments and their Show all label from role text", async (t) => {
+  const page = await fixture(t, `<main>
+    <div componentkey="com.linkedin.sdui.profile.card.refPERSONExperienceDetailsSection">
+      <div componentkey="entity-collection-item-one"><p>Producer</p><p>Example Events</p>
+        <p>Ran the speaker programme.</p>
+        <a href="/in/jordan/overlay/Position/1/image-list/?profileId=x"><p>Conference recap</p></a>
+        <a href="/in/jordan/overlay/Position/1/treasury/?profileId=x"><p>Research lab</p></a>
+        <a href="/in/jordan/overlay/Position/1/image-list/?profileId=x">Show all 4 media</a></div>
+    </div></main>`, "details/experience/");
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
+  assert.equal(result.text, "Producer\nExample Events\nRan the speaker programme.");
+});

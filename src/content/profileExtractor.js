@@ -20,7 +20,7 @@
 
   const removableLinePatterns = [
     /^(?:show|see|view) (?:more|less)$/i,
-    /^(?:show|see|view) all(?: \d+)?(?: experiences?|educations?)?$/i,
+    /^(?:show|see|view) all(?: \d+)?(?: experiences?| educations?| media)?$/i,
     /^expand (?:this )?section/i,
     /^collapse (?:this )?section/i,
     /^end of list$/i,
@@ -42,7 +42,8 @@
   let capturePanelState = null;
   const excludedContainers = "script, style, nav, aside, footer, "
     + "[role='dialog'], [hidden], .visually-hidden, .sr-only, .lpc-panel";
-  const excludedContent = `button, [role='button'], a[href*='/skill-associations-details'], ${excludedContainers}`;
+  // Overlay links are role skills and media attachments, not profile text.
+  const excludedContent = `button, [role='button'], a[href*='/overlay/'], ${excludedContainers}`;
 
   function primaryRoot() {
     const main = document.querySelector(".scaffold-layout__main")

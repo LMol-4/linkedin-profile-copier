@@ -38,6 +38,7 @@
     /^select language$/i,
     /^linkedin corporation ©\s*\d{4}$/i
   ];
+  const DETAIL_SETTLE_MS = 2500;
   const startedCaptureJobs = new Set();
   let capturePanelState = null;
   const excludedContainers = "script, style, nav, aside, footer, "
@@ -399,9 +400,10 @@
     if (!content) throw new Error("The requested section has not loaded.");
 
     let previous = "";
-    let stable = 0;
+    let previousShape = "";
+    let settledSince = 0;
     const clicked = new WeakSet();
-    for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
+    while (Date.now() < deadline) {
       content = findContent();
       await expandDescriptions(content, clicked, deadline);
       const text = cleanSectionText(elementText(content), key);
@@ -429,9 +431,13 @@
         const step = Math.round(position.viewport * randomBetween(0.58, 0.86));
         setScrollPosition(surface, position.left, Math.min(position.height - position.viewport, position.top + step));
       }
-      stable = text === previous && !more && !loading && atBottom ? stable + 1 : 0;
-      if (text && stable >= 3) return { text, incomplete: false };
+      // Lazy lists pause between batches with no loader, so require a quiet period at the bottom.
+      const entries = content?.querySelectorAll("[componentkey^='entity-collection-item']").length || 0;
+      const shape = `${entries}|${position.height}|${text}`;
+      settledSince = shape === previousShape && !more && !loading && atBottom ? settledSince || Date.now() : 0;
+      if (text && settledSince && Date.now() - settledSince >= DETAIL_SETTLE_MS) return { text, incomplete: false };
       previous = text;
+      previousShape = shape;
       await pause(Math.min(
         loadingMore ? randomBetween(750, 1350) : randomBetween(320, 520),
         deadline - Date.now()

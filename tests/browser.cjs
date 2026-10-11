@@ -712,3 +712,30 @@ test("keeps scanning until every selected section mounts, including About", asyn
     about: "Late summary", experience: "Late role", education: "Example University"
   });
 });
+
+test("waits through slow lazy batches before calling a details list complete", async (t) => {
+  const role = (n) => `<div componentkey="entity-collection-item-${n}" style="height:150px"><p>Role ${n}</p></div>`;
+  const page = await fixture(t, `<main style="height:300px;overflow-y:auto">
+    <div componentkey="com.linkedin.sdui.profile.card.refPERSONExperienceDetailsSection">
+      <div data-component-type="LazyColumn" style="display:contents">${[1, 2, 3].map(role).join("")}</div></div></main>`,
+  "details/experience/");
+  await page.evaluate((template) => {
+    const main = document.querySelector("main");
+    const column = document.querySelector("[data-component-type='LazyColumn']");
+    let next = 4;
+    let pending = false;
+    main.addEventListener("scroll", () => {
+      if (pending || next > 9 || main.scrollTop + main.clientHeight < main.scrollHeight - 5) return;
+      pending = true;
+      // A real-time delay with no loader or busy marker, like LinkedIn's lazy batches.
+      fixtureDelay(() => {
+        column.insertAdjacentHTML("beforeend", [next, next + 1, next + 2].map((n) => template.replace(/N/g, n)).join(""));
+        next += 3;
+        pending = false;
+      }, 700);
+    });
+  }, role("N"));
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, Array.from({ length: 9 }, (_, i) => `Role ${i + 1}`).join("\n"));
+});

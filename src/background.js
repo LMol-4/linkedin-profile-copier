@@ -17,16 +17,11 @@ let creatingOffscreenDocument;
 async function hasOffscreenDocument() {
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
 
-  if (chrome.runtime.getContexts) {
-    const contexts = await chrome.runtime.getContexts({
-      contextTypes: ["OFFSCREEN_DOCUMENT"],
-      documentUrls: [offscreenUrl]
-    });
-    return contexts.length > 0;
-  }
-
-  const matchedClients = await clients.matchAll();
-  return matchedClients.some(({ url }) => url === offscreenUrl);
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [offscreenUrl]
+  });
+  return contexts.length > 0;
 }
 
 async function ensureOffscreenDocument() {
@@ -196,7 +191,6 @@ async function prepareCaptureJob(request) {
     id: jobId,
     status: "ready",
     statusText: "Preparing full profile…",
-    mode: "full",
     settings,
     sourceTabId: sourceTab.id,
     sourceWindowId: sourceTab.windowId,
@@ -258,10 +252,8 @@ function hasRequestedDetailSection(profile, settings) {
 }
 
 async function readBaseProfile(jobId, job) {
-  let response;
-
   for (let attempt = 0; attempt < MAX_BASE_PROFILE_READS; attempt += 1) {
-    response = await sendToProfileTab(job.sourceTabId, {
+    const response = await sendToProfileTab(job.sourceTabId, {
       type: "EXTRACT_BASE_PROFILE",
       settings: job.settings,
       loadLazySections: attempt === 0
@@ -286,8 +278,6 @@ async function readBaseProfile(jobId, job) {
     await pauseWithin(CAPTURE_DELAYS.beforeBaseRetry);
     await checkCapture(job);
   }
-
-  return response.profile;
 }
 
 async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, total) {
@@ -366,7 +356,6 @@ async function collectProfile(jobId) {
     await checkCapture(job);
     const profile = await readBaseProfile(jobId, job);
     await checkCapture(job);
-    profile.mode = job.mode;
     const warnings = [];
     const fallbackSections = new Set();
 

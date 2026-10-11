@@ -14,6 +14,25 @@ test("accepts a profile URL with a query and no trailing slash when messaging", 
   assert.equal(response.ok, true);
 });
 
+test("reinjects the manifest's content scripts when the profile tab has none", async () => {
+  const h = setup();
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../manifest.json"), "utf8"));
+  const injected = [];
+  let attempts = 0;
+  Object.assign(h.context.chrome.runtime, { getManifest: () => manifest });
+  Object.assign(h.context.chrome.scripting, {
+    async insertCSS({ files }) { injected.push(...files); },
+    async executeScript({ files }) { injected.push(...files); }
+  });
+  h.context.chrome.tabs.sendMessage = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("Could not establish connection. Receiving end does not exist.");
+    return { ok: true };
+  };
+  assert.equal((await h.context.sendToProfileTab(1, { type: "SHOW_CAPTURE_PANEL" })).ok, true);
+  assert.deepEqual(injected, [...manifest.content_scripts[0].css, ...manifest.content_scripts[0].js]);
+});
+
 function setup(options = {}) {
   const stored = { ...options.stored };
   const tabs = new Map([[1, { id: 1, windowId: 7, url: sourceUrl, status: "complete" }]]);

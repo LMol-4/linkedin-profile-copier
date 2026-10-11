@@ -74,10 +74,11 @@ function profileRoot(urlValue) {
 }
 
 function randomBetween(minimum, maximum) {
-  const range = maximum - minimum + 1;
-  const randomValue = new Uint32Array(1);
-  crypto.getRandomValues(randomValue);
-  return minimum + (randomValue[0] % range);
+  return minimum + Math.floor(Math.random() * (maximum - minimum + 1));
+}
+
+function sectionLabel(sectionKey) {
+  return ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label;
 }
 
 function sleep(milliseconds) {
@@ -227,27 +228,16 @@ async function waitForTab(tabId, timeoutMs = 20000, description = "a detail page
 
 async function sendToProfileTab(tabId, message) {
   const tab = await chrome.tabs.get(tabId);
-  const targetUrl = new URL(tab.url || "about:blank");
-  if (targetUrl.protocol !== "https:" || !/(^|\.)linkedin\.com$/i.test(targetUrl.hostname)
-    || !/^\/in\/[^/]+(?:\/|$)/i.test(targetUrl.pathname)) {
+  if (!ProfileCopyConfig.isProfilePage(tab.url, true)) {
     throw new Error("The LinkedIn profile page is no longer open.");
   }
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (error) {
     if (!/receiving end does not exist|could not establish connection/i.test(error.message)) throw error;
-    await chrome.scripting.insertCSS({
-      target: { tabId },
-      files: ["src/content/profileOverlay.css"]
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [
-        "src/shared/config.js",
-        "src/shared/formatter.js",
-        "src/content/profileExtractor.js"
-      ]
-    });
+    const [{ css, js }] = chrome.runtime.getManifest().content_scripts;
+    await chrome.scripting.insertCSS({ target: { tabId }, files: css });
+    await chrome.scripting.executeScript({ target: { tabId }, files: js });
     return chrome.tabs.sendMessage(tabId, message);
   }
 }
@@ -301,10 +291,10 @@ async function readBaseProfile(jobId, job) {
 }
 
 async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, total) {
-  const definition = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey);
+  const label = sectionLabel(sectionKey);
   await checkCapture(job);
   await patchJob(jobId, {
-    statusText: `Loading full ${definition.label.toLowerCase()}…`,
+    statusText: `Loading full ${label.toLowerCase()}…`,
     progress: { current: index + 1, total }
   });
 
@@ -331,7 +321,7 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     });
 
     if (!response?.ok) {
-      throw new Error(response?.error || `Could not read ${definition.label}.`);
+      throw new Error(response?.error || `Could not read ${label}.`);
     }
 
     return response;
@@ -401,14 +391,13 @@ async function collectProfile(jobId) {
           profile.sections[sectionKey] = detail.text;
         }
         if (detail.incomplete || !detail.text?.trim()) fallbackSections.add(sectionKey);
-        if (detail.incomplete) warnings.push(`${ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label} (loading limit reached)`);
+        if (detail.incomplete) warnings.push(`${sectionLabel(sectionKey)} (loading limit reached)`);
       } catch (error) {
         await checkCapture(job);
         const unread = error.stopDetails ? detailSections.slice(index) : [sectionKey];
         warnings.push(...unread.map((section) => {
           fallbackSections.add(section);
-          const label = ProfileCopyConfig.sections.find(({ key }) => key === section).label;
-          return `${label} (${error.message || "could not be read"})`;
+          return `${sectionLabel(section)} (${error.message || "could not be read"})`;
         }));
         if (error.stopDetails) break;
       }

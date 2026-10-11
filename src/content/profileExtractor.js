@@ -270,38 +270,42 @@
     surface.scrollTop = top;
   }
 
-  async function loadLazyProfileSections(selected) {
+  // Reads down the whole profile before any details page opens, like a quick human
+  // skim, and stays at the bottom. Uneven steps, short bounces and pauses avoid a pattern.
+  async function readProfileToBottom(selected) {
     const requested = Object.keys(sectionMeta).filter((key) => selected[key] !== false);
-    if (!requested.length || requested.every(hasSectionContent)) return;
+    if (!requested.length) return;
 
     const panel = capturePanelState;
-    const initialPositions = new Map();
+    const behaviors = new Map();
+    let previousHeight = -1;
+    let settledPasses = 0;
 
     try {
-      for (let attempt = 0; attempt < 20; attempt += 1) {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
         if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");
-        if (requested.every(hasSectionContent)) break;
-
         const surface = profileScrollSurface();
-        if (!initialPositions.has(surface)) {
-          initialPositions.set(surface, {
-            ...scrollMetrics(surface), behavior: surface.style.scrollBehavior
-          });
-        }
+        if (!behaviors.has(surface)) behaviors.set(surface, surface.style.scrollBehavior);
         const current = scrollMetrics(surface);
         const maximum = Math.max(0, current.height - current.viewport);
-        // Overlapping, irregular viewport steps trigger lazy cards without a fixed scroll cadence.
-        const step = Math.max(350, Math.round(current.viewport * randomBetween(0.58, 0.86)));
-        setScrollPosition(surface, current.left, Math.min(maximum, current.top + step));
-        // Keep going until every selected section mounts: a finished-looking
-        // page can still hold a skeleton card that loads later.
-        await Promise.all([pause(randomBetween(220, 480)), afterPaint()]);
+        const distance = Math.random() < 0.15
+          ? -current.viewport * randomBetween(0.1, 0.3)
+          : current.viewport * randomBetween(0.7, 1.3);
+        setScrollPosition(surface, current.left, Math.max(0, Math.min(maximum, Math.round(current.top + distance))));
+        const dwell = Math.random() < 0.1 ? randomBetween(400, 900) : randomBetween(120, 320);
+        await Promise.all([pause(dwell), afterPaint()]);
+
+        const next = scrollMetrics(surface);
+        const atBottom = next.top + next.viewport >= next.height - 2;
+        settledPasses = atBottom && next.height === previousHeight ? settledPasses + 1 : 0;
+        previousHeight = next.height;
+        // A finished-looking page can still hold a skeleton card, so wait a little
+        // longer at the bottom for missing sections before giving up.
+        if (settledPasses >= 2 && requested.every(hasSectionContent)) break;
+        if (settledPasses >= 10) break;
       }
     } finally {
-      for (const [surface, initial] of Array.from(initialPositions).reverse()) {
-        setScrollPosition(surface, initial.left, initial.top);
-        surface.style.scrollBehavior = initial.behavior;
-      }
+      for (const [surface, behavior] of behaviors) surface.style.scrollBehavior = behavior;
     }
   }
 
@@ -346,7 +350,7 @@
       throw new Error("The profile changed during copying. Please try again.");
     }
     if (!profileName()) throw new Error("The profile is still loading. Please try again.");
-    if (loadLazySections) await loadLazyProfileSections(selected);
+    if (loadLazySections) await readProfileToBottom(selected);
 
     for (const key of Object.keys(sectionMeta)) {
       if (panel && panel !== capturePanelState) throw new Error("Copy cancelled.");

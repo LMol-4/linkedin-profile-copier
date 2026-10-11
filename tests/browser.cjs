@@ -468,7 +468,7 @@ test("expands long experience descriptions on the main profile when falling back
   assert.equal(await page.evaluate(() => !!window.badClick), false);
 });
 
-test("scrolls to mount lazy profile sections before the first extraction", async (t) => {
+test("skims to the bottom of the profile before the first extraction and stays there", async (t) => {
   const page = await fixture(t, `<main>${header}
     <section><div id="about"></div><h2>About</h2><p>Profile summary</p></section>
     <div style="height: 1800px"></div><div id="lazy-sections"></div></main>`);
@@ -500,11 +500,11 @@ test("scrolls to mount lazy profile sections before the first extraction", async
   }));
   assert.ok(scrollState.events.filter((value) => value > 0).length >= 2, JSON.stringify(scrollState));
   assert.ok(scrollState.events.every((value) => value >= 0 && value <= scrollState.scrollHeight));
-  assert.ok(scrollState.delays.every((value) => value >= 220 && value <= 480));
+  assert.ok(scrollState.delays.every((value) => (value >= 120 && value <= 320) || (value >= 400 && value <= 900)));
   assert.notEqual(scrollState.delays[0], scrollState.delays[1]);
   assert.equal(result.ok, true);
   assert.equal(result.profile.sections.experience, "Engineer at Company");
-  assert.equal(await page.evaluate(() => window.scrollY), 0);
+  assert.ok(await page.evaluate(() => scrollY + innerHeight >= document.documentElement.scrollHeight - 2));
 });
 
 test("waits for a refreshed profile body to grow before scanning lazy sections", async (t) => {
@@ -528,7 +528,7 @@ test("waits for a refreshed profile body to grow before scanning lazy sections",
 
   assert.equal(result.ok, true);
   assert.equal(result.profile.sections.experience, "Delayed role");
-  assert.equal(await page.evaluate(() => window.scrollY), 0);
+  assert.ok(await page.evaluate(() => scrollY + innerHeight >= document.documentElement.scrollHeight - 2));
 });
 
 test("scrolls when LinkedIn mounts an empty Experience placeholder", async (t) => {
@@ -576,7 +576,7 @@ test("uses a nested profile scroll container when the window cannot scroll", asy
 
   assert.ok(await page.evaluate(() => window.nestedScrollEvents.some((value) => value >= 300)));
   assert.equal(result.profile.sections.experience, "Role loaded in nested scroller");
-  assert.equal(await page.locator("#profile-scroll").evaluate((element) => element.scrollTop), 0);
+  assert.ok(await page.locator("#profile-scroll").evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2));
 });
 
 
@@ -738,4 +738,19 @@ test("waits through slow lazy batches before calling a details list complete", a
   const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
   assert.equal(result.incomplete, false);
   assert.equal(result.text, Array.from({ length: 9 }, (_, i) => `Role ${i + 1}`).join("\n"));
+});
+
+test("skims the whole profile even when every section has already loaded", async (t) => {
+  const page = await fixture(t, `<main>${header}<section><h2>Experience</h2><p>Engineer</p></section>
+    <div style="height: 2400px"></div></main>`);
+  await page.evaluate(() => {
+    window.skimSteps = [];
+    addEventListener("scroll", () => window.skimSteps.push(scrollY));
+  });
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE", loadLazySections: true,
+    settings: { sections: { about: false, education: false } } });
+  assert.equal(result.profile.sections.experience, "Engineer");
+  const steps = await page.evaluate(() => window.skimSteps);
+  assert.ok(steps.length >= 3, JSON.stringify(steps));
+  assert.ok(await page.evaluate(() => scrollY + innerHeight >= document.documentElement.scrollHeight - 2));
 });

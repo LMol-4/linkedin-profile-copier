@@ -379,7 +379,8 @@ async function collectProfile(jobId) {
           detailSections.length
         );
 
-        if (shouldUseDetail(profile.sections[sectionKey], detail.text)) {
+        // A complete details read wins even when a noisier preview is longer.
+        if ((!detail.incomplete && detail.text?.trim()) || shouldUseDetail(profile.sections[sectionKey], detail.text)) {
           profile.sections[sectionKey] = detail.text;
         }
         if (detail.incomplete || !detail.text?.trim()) fallbackSections.add(sectionKey);

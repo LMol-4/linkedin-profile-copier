@@ -202,6 +202,16 @@ test("opens this profile's details page even when the main page has no Show all 
   assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer\nFull role description");
 });
 
+test("a complete details read replaces a longer main-page preview", async () => {
+  const h = setup({
+    profile: { sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer\nShow all 4 media\nConference recap" } },
+    detail: { ok: true, text: "Engineer", incomplete: false }
+  });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer");
+});
+
 test("sections missing from the main page or disabled never open details tabs", async () => {
   {
     const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {} } });

@@ -350,8 +350,8 @@ test("a checkpoint redirect stops all remaining detail tabs and preserves availa
   assert.equal(h.removed.length, 1);
   assert.equal(result.status, "complete");
   assert.equal(result.warnings.length, 2);
-  assert.match(result.warnings[0], /Experience.*redirected/);
-  assert.match(result.warnings[1], /Education.*redirected/);
+  assert.match(result.warnings[0], /Experience.*security check/);
+  assert.match(result.warnings[1], /Education.*security check/);
   assert.deepEqual(result.profile.sections, { experience: "Engineer", education: "University" });
   assert.equal(h.messages.some((message) => message.type === "EXTRACT_DETAIL_SECTION"), false);
 });

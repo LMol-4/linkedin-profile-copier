@@ -303,7 +303,9 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     await checkCapture(job);
     const loadedTab = await chrome.tabs.get(detailTab.id);
     if (comparableUrl(loadedTab.url) !== comparableUrl(detailUrl)) {
-      throw Object.assign(new Error("LinkedIn redirected to a different page."), { stopDetails: true });
+      const blocked = /^\/(?:authwall|checkpoint|challenge|login|uas\/login)/i.test(new URL(loadedTab.url).pathname);
+      throw Object.assign(new Error(blocked ? "LinkedIn asked for a sign-in or security check"
+        : "LinkedIn redirected to a different page."), { stopDetails: true });
     }
     const response = await sendToProfileTab(detailTab.id, {
       type: "EXTRACT_DETAIL_SECTION",

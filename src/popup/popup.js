@@ -172,7 +172,13 @@ async function initialise() {
     }
     ready = true;
     updateCopyState();
-    if (!ProfileCopyConfig.isProfilePage(activeTab?.url)) {
+    const jobs = await chrome.storage.session.get(null);
+    const runningJob = Object.entries(jobs).find(([key, job]) => key.startsWith("profile-copy-job:")
+      && job?.sourceTabId === activeTab?.id && ["ready", "running"].includes(job.status))?.[1];
+    if (runningJob) {
+      currentJobId = runningJob.id;
+      renderJob(runningJob);
+    } else if (!ProfileCopyConfig.isProfilePage(activeTab?.url)) {
       popupStatus.textContent = "Open the main LinkedIn profile to copy. Settings is still available.";
     } else if (settings.startOnOpen) {
       await startCopy();

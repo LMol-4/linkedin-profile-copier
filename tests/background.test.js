@@ -120,7 +120,7 @@ for (const fails of [false, true]) test(`education mounts in a visible tab and r
     }
     return send(id, message);
   };
-  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false, experience: false } } });
   await h.context.runCapture(job.jobId);
   assert.equal(h.created.length, 1);
   assert.equal(h.created[0].active, true);
@@ -161,7 +161,7 @@ test("retries when LinkedIn initially renders About without work history", async
       sections: { about: "Profile summary", experience: "", education: "" }
     } });
     return send(id, message).then((response) => {
-      response.profile.sections.education = "University";
+      Object.assign(response.profile.sections, { about: "Profile summary", education: "University" });
       return response;
     });
   };
@@ -212,6 +212,16 @@ test("a complete details read replaces a longer main-page preview", async () => 
   assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer");
 });
 
+test("selected sections that never load are retried and then named in a warning", async () => {
+  const h = setup();
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  await h.context.runCapture(job.jobId);
+  const result = h.stored[key(job.jobId)];
+  assert.equal(h.messages.filter((message) => message.type === "EXTRACT_BASE_PROFILE").length, 4);
+  assert.deepEqual(result.warnings, ["About (not found on the profile)", "Education (not found on the profile)"]);
+  assert.match(result.profile.sections.experience, /Full role description/);
+});
+
 test("sections missing from the main page or disabled never open details tabs", async () => {
   {
     const h = setup({ profile: { sourceUrl, header: { name: "Jordan" }, sections: {} } });
@@ -233,7 +243,7 @@ test("a details page redirected to another case or encoding of the slug still co
       sections: { experience: "Engineer" } }
   });
   h.tabs.get(1).url = "https://www.linkedin.com/in/J%C3%B3rdan/";
-  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false, education: false } } });
   await h.context.runCapture(job.jobId);
   assert.equal(h.created[0].url, detailUrl);
   assert.equal(h.stored[key(job.jobId)].profile.sections.experience, "Engineer\nFull role description");
@@ -356,7 +366,7 @@ test("a checkpoint redirect stops all remaining detail tabs and preserves availa
   const h = setup({ redirect: "https://www.linkedin.com/checkpoint/challenge/", profile: {
     sourceUrl, header: { name: "Jordan" }, sections: { experience: "Engineer", education: "University" }
   } });
-  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+  const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false } } });
   await h.context.runCapture(job.jobId);
   const result = h.stored[key(job.jobId)];
   assert.equal(h.created.length, 1);
@@ -403,7 +413,7 @@ test("detail warnings retain the underlying error and available profile text", a
 test("successful detail reads never trigger main-profile expansion, even with identical text", async () => {
   for (const text of ["Engineer", "Engineer\nComplete role description"]) {
     const h = setup({ detail: { ok: true, text, incomplete: false } });
-    const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: {} });
+    const job = await h.context.createCaptureJob({ sourceTabId: 1, settings: { sections: { about: false, education: false } } });
     await h.context.runCapture(job.jobId);
     assert.equal(h.messages.filter((message) => message.type === "EXTRACT_BASE_PROFILE").length, 1);
     assert.deepEqual(h.stored[key(job.jobId)].warnings, []);

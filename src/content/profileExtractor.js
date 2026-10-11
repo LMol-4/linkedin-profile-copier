@@ -270,15 +270,11 @@
   }
 
   async function loadLazyProfileSections(selected) {
-    const requested = Object.keys(ProfileCopyConfig.detailPaths)
-      .filter((key) => selected[key] !== false);
+    const requested = Object.keys(sectionMeta).filter((key) => selected[key] !== false);
     if (!requested.length || requested.every(hasSectionContent)) return;
 
     const panel = capturePanelState;
     const initialPositions = new Map();
-    let unchangedBottomPasses = 0;
-    let previousHeight = 0;
-    let previousSurface = null;
 
     try {
       for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -291,26 +287,14 @@
             ...scrollMetrics(surface), behavior: surface.style.scrollBehavior
           });
         }
-        if (surface !== previousSurface) {
-          unchangedBottomPasses = 0;
-          previousHeight = 0;
-          previousSurface = surface;
-        }
         const current = scrollMetrics(surface);
         const maximum = Math.max(0, current.height - current.viewport);
         // Overlapping, irregular viewport steps trigger lazy cards without a fixed scroll cadence.
         const step = Math.max(350, Math.round(current.viewport * randomBetween(0.58, 0.86)));
         setScrollPosition(surface, current.left, Math.min(maximum, current.top + step));
+        // Keep going until every selected section mounts: a finished-looking
+        // page can still hold a skeleton card that loads later.
         await Promise.all([pause(randomBetween(220, 480)), afterPaint()]);
-
-        const next = scrollMetrics(surface);
-        const atBottom = next.top + next.viewport >= next.height - 2;
-        unchangedBottomPasses = atBottom && next.height <= previousHeight
-          ? unchangedBottomPasses + 1 : 0;
-        // A freshly refreshed profile may still be header-only. Do not treat that
-        // short document as final until LinkedIn has mounted a requested section.
-        if (unchangedBottomPasses >= 3 && requested.some(hasSectionContent)) break;
-        previousHeight = next.height;
       }
     } finally {
       for (const [surface, initial] of Array.from(initialPositions).reverse()) {

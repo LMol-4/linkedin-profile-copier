@@ -247,8 +247,9 @@ function shouldUseDetail(currentText, detailText) {
   return detailScore > currentScore;
 }
 
-function hasRequestedDetailSection(profile, settings) {
-  return Object.keys(DETAIL_PATHS).some((key) => settings.sections[key] && profile.sections?.[key]?.trim());
+function emptySelectedSections(profile, settings) {
+  return ProfileCopyConfig.sections.map(({ key }) => key)
+    .filter((key) => key !== "header" && settings.sections[key] && !profile.sections?.[key]?.trim());
 }
 
 async function readBaseProfile(jobId, job) {
@@ -268,9 +269,7 @@ async function readBaseProfile(jobId, job) {
       throw new Error("The profile changed during copying. Please try again.");
     }
 
-    const requestedDetails = Object.keys(DETAIL_PATHS).some((key) => job.settings.sections[key]);
-    if (!requestedDetails || hasRequestedDetailSection(profile, job.settings)
-      || attempt === MAX_BASE_PROFILE_READS - 1) {
+    if (!emptySelectedSections(profile, job.settings).length || attempt === MAX_BASE_PROFILE_READS - 1) {
       return profile;
     }
 
@@ -411,6 +410,9 @@ async function collectProfile(jobId) {
           if (shouldUseDetail(profile.sections[key], text)) profile.sections[key] = text;
         }
       }
+    }
+    for (const key of emptySelectedSections(profile, job.settings)) {
+      warnings.push(`${sectionLabel(key)} (not found on the profile)`);
     }
     let autoCopyStatus = null;
     if (job.settings.autoCopy) {

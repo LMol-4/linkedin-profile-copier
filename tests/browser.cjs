@@ -699,3 +699,16 @@ test("drops media attachments and their Show all label from role text", async (t
   const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "experience" });
   assert.equal(result.text, "Producer\nExample Events\nRan the speaker programme.");
 });
+
+test("keeps scanning until every selected section mounts, including About", async (t) => {
+  const page = await fixture(t, `<main>${header}<div id="late"></div>
+    <section><h2>Education</h2><p>Example University</p></section></main>`);
+  await page.evaluate(() => fixtureDelay(() => {
+    document.querySelector("#late").innerHTML = `<section><h2>About</h2><p>Late summary</p></section>
+      <section><h2>Experience</h2><p>Late role</p></section>`;
+  }, 250));
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE", loadLazySections: true });
+  assert.deepEqual(result.profile.sections, {
+    about: "Late summary", experience: "Late role", education: "Example University"
+  });
+});

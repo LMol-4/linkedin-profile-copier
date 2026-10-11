@@ -1,9 +1,10 @@
 (function installProfileExtractor() {
-  if (globalThis.__LINKEDIN_PROFILE_COPY_INSTALLED__) {
+  // A copy orphaned by an extension reload keeps its global, so only skip a live one.
+  if (globalThis.__LINKEDIN_PROFILE_COPY_INSTALLED__?.()) {
     return;
   }
 
-  globalThis.__LINKEDIN_PROFILE_COPY_INSTALLED__ = true;
+  globalThis.__LINKEDIN_PROFILE_COPY_INSTALLED__ = () => Boolean(chrome.runtime?.id);
 
   const sectionMeta = {
     about: { ids: ["about"], headings: ["about"] },

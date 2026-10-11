@@ -3,13 +3,12 @@
   "name": "LinkedIn Profile Scraper",
   "version": "0.2.0",
   "description": "Copy a complete LinkedIn profile as clean text without leaving the profile tab.",
+  "minimum_chrome_version": "116",
   "permissions": [
-    "activeTab",
     "clipboardWrite",
     "offscreen",
     "scripting",
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "https://*.linkedin.com/*"

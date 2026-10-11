@@ -228,9 +228,9 @@
     };
   };
 
-  function profileScrollSurface() {
+  function profileScrollSurface(start = primaryRoot()) {
     const documentSurface = document.scrollingElement || document.documentElement;
-    for (let element = primaryRoot(); element && element !== document.body; element = element.parentElement) {
+    for (let element = start; element && element !== document.body; element = element.parentElement) {
       const overflow = window.getComputedStyle(element).overflowY;
       if (/^(?:auto|scroll|overlay)$/.test(overflow)
         && element.scrollHeight > element.clientHeight + 2) return element;
@@ -429,10 +429,15 @@
         if (Date.now() >= deadline) return { text, incomplete: true };
         if (more.isConnected && !more.disabled) more.click();
       }
-      content?.lastElementChild?.scrollIntoView({
-        block: Math.random() < 0.5 ? "center" : "end"
-      });
-      stable = text === previous && !more && !loading ? stable + 1 : 0;
+      // Page the real scroller: scrollIntoView does nothing on display: contents wrappers.
+      const surface = profileScrollSurface(content);
+      const position = scrollMetrics(surface);
+      const atBottom = position.top + position.viewport >= position.height - 2;
+      if (!atBottom) {
+        const step = Math.round(position.viewport * randomBetween(0.58, 0.86));
+        setScrollPosition(surface, position.left, Math.min(position.height - position.viewport, position.top + step));
+      }
+      stable = text === previous && !more && !loading && atBottom ? stable + 1 : 0;
       if (text && stable >= 3) return { text, incomplete: false };
       previous = text;
       await pause(Math.min(

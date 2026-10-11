@@ -670,3 +670,26 @@ test("education waits while its matching card is busy loading additional schools
   assert.equal(result.incomplete, false);
   assert.equal(result.text, "First University\nEarlier School");
 });
+
+test("education details scroll the page scroller to load schools behind display: contents wrappers", async (t) => {
+  const school = (n) => `<div style="height:120px"><p>School ${n}</p></div>`;
+  const page = await fixture(t, `<main style="height:300px;overflow-y:auto">
+    <div componentkey="com.linkedin.sdui.profile.card.refPERSONEducationDetailsSection">
+      <p>Education</p><div data-component-type="LazyColumn" style="display:contents">
+        ${[1, 2, 3].map(school).join("")}</div></div></main>`, "details/education/");
+  await page.evaluate((batch) => {
+    const main = document.querySelector("main");
+    const column = document.querySelector("[data-component-type='LazyColumn']");
+    let next = 4;
+    main.addEventListener("scroll", () => {
+      if (next <= 9 && main.scrollTop + main.clientHeight >= main.scrollHeight - 50) {
+        column.insertAdjacentHTML("beforeend", batch.replace(/N/g, next) + batch.replace(/N/g, next + 1) + batch.replace(/N/g, next + 2));
+        next += 3;
+      }
+    });
+  }, school("N"));
+  const result = await extract(page, { type: "EXTRACT_DETAIL_SECTION", sectionKey: "education" });
+  assert.equal(result.ok, true);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.text, [...Array.from({ length: 9 }, (_, i) => `School ${i + 1}`)].join("\n"));
+});

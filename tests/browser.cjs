@@ -700,3 +700,15 @@ test("finds the Show all link when its profile slug differs in case", async (t) 
   const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
   assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/Jordan/details/experience/");
 });
+
+test("finds SDUI sections by card key when LinkedIn is not in English", async (t) => {
+  const card = (key, heading, body) => `<section componentkey="com.linkedin.sdui.profile.card.refPERSON${key}">
+    <h2>${heading}</h2><p>${body}</p></section>`;
+  const page = await fixture(t, `<main>${header}${card("About", "Infos", "Ingénieure à Paris")}
+    ${card("ExperienceTopLevelSection", "Expérience", "Ingénieure\nAcme")}
+    ${card("EducationTopLevelSection", "Formation", "Sorbonne")}</main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.deepEqual(result.profile.sections, {
+    about: "Ingénieure à Paris", experience: "Ingénieure\nAcme", education: "Sorbonne"
+  });
+});

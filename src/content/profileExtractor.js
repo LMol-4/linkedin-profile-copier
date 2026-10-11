@@ -7,9 +7,15 @@
   globalThis.__LINKEDIN_PROFILE_COPY_INSTALLED__ = () => Boolean(chrome.runtime?.id);
 
   const sectionMeta = {
-    about: { ids: ["about"], headings: ["about"] },
-    experience: { ids: ["experience"], headings: ["experience"] },
-    education: { ids: ["education"], headings: ["education"] }
+    about: { ids: ["about"], headings: ["about"], cardKeys: ["About", "AboutTopLevel", "AboutTopLevelSection"] },
+    experience: {
+      ids: ["experience"], headings: ["experience"],
+      cardKeys: ["Experience", "ExperienceTopLevel", "ExperienceTopLevelSection"]
+    },
+    education: {
+      ids: ["education"], headings: ["education"],
+      cardKeys: ["Education", "EducationTopLevel", "EducationTopLevelSection"]
+    }
   };
 
   const removableLinePatterns = [
@@ -124,6 +130,12 @@
       }
     }
 
+    // SDUI card keys name the section in English whatever the interface language.
+    const card = Array.from(main.querySelectorAll("section[componentkey^='com.linkedin.sdui.profile.card.']"))
+      .find((section) => meta.cardKeys.some((suffix) => section.getAttribute("componentkey").endsWith(suffix))
+        && !section.closest(excludedContent));
+    if (card) return card;
+
     const headings = main.querySelectorAll(
       "h1, h2, h3, [role='heading'], .pvs-header__title"
     );
@@ -159,6 +171,13 @@
     });
 
     return lines.join("\n").trim();
+  }
+
+  // Also drops the card's own heading, which may not be in English.
+  function sectionText(section, key) {
+    const lines = cleanSectionText(elementText(section), key).split("\n");
+    const heading = normaliseLine(elementText(section?.querySelector("h2, h3, [role='heading']")));
+    return (heading && lines[0] === heading ? lines.slice(1) : lines).join("\n");
   }
 
   function extractHeader() {
@@ -209,7 +228,7 @@
   const randomBetween = (minimum, maximum) => minimum + Math.random() * (maximum - minimum);
   const hasSectionContent = (key) => {
     const section = findSection(key);
-    return Boolean(section && cleanSectionText(elementText(section), key));
+    return Boolean(section && sectionText(section, key));
   };
   const scrollMetrics = (surface) => {
     if (surface === document.scrollingElement) {
@@ -362,7 +381,7 @@
         }
       }
       if (!detailUrls[key] || expandLinkedSections) await expandDescriptions(section);
-      sections[key] = cleanSectionText(elementText(section), key);
+      sections[key] = sectionText(section, key);
     }
 
     return {

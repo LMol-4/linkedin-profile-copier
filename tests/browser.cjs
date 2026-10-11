@@ -693,3 +693,10 @@ test("education details scroll the page scroller to load schools behind display:
   assert.equal(result.incomplete, false);
   assert.equal(result.text, [...Array.from({ length: 9 }, (_, i) => `School ${i + 1}`)].join("\n"));
 });
+
+test("finds the Show all link when its profile slug differs in case", async (t) => {
+  const page = await fixture(t, `<main>${header}<section><h2>Experience</h2><p>Engineer</p>
+    <a href="/in/Jordan/details/experience">Show all 9 experiences</a></section></main>`);
+  const result = await extract(page, { type: "EXTRACT_BASE_PROFILE" });
+  assert.equal(result.profile.detailUrls.experience, "https://www.linkedin.com/in/Jordan/details/experience/");
+});

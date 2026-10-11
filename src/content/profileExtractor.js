@@ -44,6 +44,7 @@
     return main?.querySelector("section[aria-label='Primary content']") || main;
   }
 
+  const { comparableUrl } = ProfileCopyConfig;
   const sduiTopcard = "section[componentkey^='com.linkedin.sdui.profile.card.'][componentkey$='Topcard']";
 
   function profileName() {
@@ -61,15 +62,12 @@
         "a[componentkey='topcard-logo-image-referencekey']"
       );
       if (contact && card.querySelector("h2") === heading) {
-        const contactUrl = new URL(contact.href, window.location.href);
         const expected = `${window.location.pathname.replace(/\/$/, "")}/overlay/contact-info/`;
-        if (contactUrl.origin === window.location.origin
-          && `${contactUrl.pathname.replace(/\/$/, "")}/` === expected) return true;
+        if (comparableUrl(contact.href, window.location.href)
+          === comparableUrl(expected, window.location.href)) return true;
       }
       if (!link) return Boolean(heading.closest(sduiTopcard));
-      const url = new URL(link.href, window.location.href);
-      return url.origin === window.location.origin
-        && url.pathname.replace(/\/$/, "") === window.location.pathname.replace(/\/$/, "");
+      return comparableUrl(link.href, window.location.href) === comparableUrl(window.location.href);
     });
   }
 
@@ -357,8 +355,9 @@
       for (const link of section?.querySelectorAll("a[href]") || []) {
         const url = new URL(link.href, window.location.href);
         const expected = `${window.location.pathname.replace(/\/$/, "")}/details/${path}/`;
-        if (path && url.origin === window.location.origin && `${url.pathname.replace(/\/$/, "")}/` === expected) {
-          detailUrls[key] = `${url.origin}${expected}`;
+        if (path && comparableUrl(url.href) === comparableUrl(expected, window.location.href)) {
+          // Open LinkedIn's own spelling of the URL so it does not redirect.
+          detailUrls[key] = `${url.origin}${url.pathname.replace(/\/?$/, "/")}`;
           break;
         }
       }

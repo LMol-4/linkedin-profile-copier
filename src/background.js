@@ -62,10 +62,11 @@ function jobKey(jobId) {
 
 const isLinkedInProfile = ProfileCopyConfig.isProfilePage;
 
+const { comparableUrl } = ProfileCopyConfig;
+
+// Lower-cased and decoded, so only use it for comparisons.
 function profileRoot(urlValue) {
-  const url = new URL(urlValue);
-  const match = url.pathname.match(/^\/in\/[^/]+/i);
-  return `${url.origin}${match[0]}`;
+  return comparableUrl(urlValue).match(/^[^/]+\/\/[^/]+\/in\/[^/]+/)[0];
 }
 
 function randomBetween(minimum, maximum) {
@@ -301,8 +302,7 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     await pauseWithin(CAPTURE_DELAYS.afterDetailLoad);
     await checkCapture(job);
     const loadedTab = await chrome.tabs.get(detailTab.id);
-    const loadedUrl = new URL(loadedTab.url);
-    if (`${loadedUrl.origin}${loadedUrl.pathname.replace(/\/?$/, "/")}` !== detailUrl) {
+    if (comparableUrl(loadedTab.url) !== comparableUrl(detailUrl)) {
       throw Object.assign(new Error("LinkedIn redirected to a different page."), { stopDetails: true });
     }
     const response = await sendToProfileTab(detailTab.id, {
@@ -361,7 +361,8 @@ async function collectProfile(jobId) {
 
     const detailSections = Object.keys(DETAIL_PATHS).filter(
       (key) => job.settings.sections[key]
-        && profile.detailUrls?.[key] === `${profileRoot(job.sourceUrl)}/details/${DETAIL_PATHS[key]}/`
+        && profile.detailUrls?.[key]
+        && comparableUrl(profile.detailUrls[key]) === `${profileRoot(job.sourceUrl)}/details/${DETAIL_PATHS[key]}/`
     );
 
     for (let index = 0; index < detailSections.length; index += 1) {

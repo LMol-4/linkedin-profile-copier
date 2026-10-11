@@ -14,8 +14,27 @@ test("accepts a profile URL with a query and no trailing slash when messaging", 
   assert.equal(response.ok, true);
 });
 
+test("reinjects the manifest's content scripts when the profile tab has none", async () => {
+  const h = setup();
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../manifest.json"), "utf8"));
+  const injected = [];
+  let attempts = 0;
+  Object.assign(h.context.chrome.runtime, { getManifest: () => manifest });
+  Object.assign(h.context.chrome.scripting, {
+    async insertCSS({ files }) { injected.push(...files); },
+    async executeScript({ files }) { injected.push(...files); }
+  });
+  h.context.chrome.tabs.sendMessage = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("Could not establish connection. Receiving end does not exist.");
+    return { ok: true };
+  };
+  assert.equal((await h.context.sendToProfileTab(1, { type: "SHOW_CAPTURE_PANEL" })).ok, true);
+  assert.deepEqual(injected, [...manifest.content_scripts[0].css, ...manifest.content_scripts[0].js]);
+});
+
 function setup(options = {}) {
-  const stored = {};
+  const stored = { ...options.stored };
   const tabs = new Map([[1, { id: 1, windowId: 7, url: sourceUrl, status: "complete" }]]);
   const created = [];
   const removed = [];
@@ -243,6 +262,14 @@ test("a new request recovers from a stopped worker and closes its orphaned tab",
   assert.notEqual(job.jobId, "stale");
   assert.equal(h.stored[key("stale")], undefined);
   assert.ok(h.removed.includes(99));
+});
+
+test("a restarted worker clears jobs its predecessor left running", async () => {
+  const h = setup({ stored: { [key("stale")]: { id: "stale", sourceTabId: 1, sourceUrl, status: "running", detailTabId: 99 } } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.stored[key("stale")], undefined);
+  assert.ok(h.removed.includes(99));
+  assert.ok(h.messages.some((message) => message.type === "CAPTURE_JOB_CLEARED"));
 });
 
 test("partial details and clipboard failures remain visible to the user", async () => {

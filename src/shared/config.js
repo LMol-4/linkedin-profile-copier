@@ -25,11 +25,12 @@
     };
   }
 
-  function isProfilePage(value) {
+  // allowSubpath also accepts the profile's detail pages.
+  function isProfilePage(value, allowSubpath = false) {
     try {
       const url = new URL(value);
       return url.protocol === "https:" && /(^|\.)linkedin\.com$/i.test(url.hostname)
-        && /^\/in\/[^/]+\/?$/i.test(url.pathname);
+        && (allowSubpath ? /^\/in\/[^/]+(?:\/|$)/i : /^\/in\/[^/]+\/?$/i).test(url.pathname);
     } catch {
       return false;
     }

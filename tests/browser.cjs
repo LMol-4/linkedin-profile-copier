@@ -205,7 +205,8 @@ async function popupFixture(t, options = {}) {
           get: async () => { if (options.loadFails) throw new Error("Storage unavailable"); return options.settings || {}; },
           set: async (value) => { if (options.saveFails) throw new Error("Storage unavailable"); window.settingsWrites.push(value); }
         },
-        session: { get: async (key) => ({ [key]: { status: "running", statusText: "Reading profile…" } }) },
+        session: { get: async (key) => key === null ? options.jobs || {}
+          : { [key]: { status: "running", statusText: "Reading profile…" } } },
         onChanged: { addListener: (fn) => window.storageListeners.push(fn) }
       },
       runtime: { sendMessage: async (message) => {
@@ -250,6 +251,14 @@ test("manual copy, cancellation, and keyboard navigation work", async (t) => {
   await page.getByRole("tab", { name: "Copy", exact: true }).focus();
   await page.keyboard.press("ArrowRight");
   assert.equal(await page.locator("#settings-tab").getAttribute("aria-selected"), "true");
+});
+
+test("reopening the popup shows the running copy and its cancel button", async (t) => {
+  const page = await popupFixture(t, { jobs: { "profile-copy-job:job": {
+    id: "job", sourceTabId: 1, status: "running", statusText: "Loading full experience…"
+  } } });
+  await page.getByRole("button", { name: "Cancel copy" }).click();
+  assert.deepEqual(await page.evaluate(() => window.requests.map((m) => m.type)), ["CLEAR_CAPTURE_JOB"]);
 });
 
 test("settings load failure never starts a copy with defaults", async (t) => {

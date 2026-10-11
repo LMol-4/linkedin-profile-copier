@@ -17,16 +17,11 @@ let creatingOffscreenDocument;
 async function hasOffscreenDocument() {
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
 
-  if (chrome.runtime.getContexts) {
-    const contexts = await chrome.runtime.getContexts({
-      contextTypes: ["OFFSCREEN_DOCUMENT"],
-      documentUrls: [offscreenUrl]
-    });
-    return contexts.length > 0;
-  }
-
-  const matchedClients = await clients.matchAll();
-  return matchedClients.some(({ url }) => url === offscreenUrl);
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [offscreenUrl]
+  });
+  return contexts.length > 0;
 }
 
 async function ensureOffscreenDocument() {
@@ -74,10 +69,11 @@ function profileRoot(urlValue) {
 }
 
 function randomBetween(minimum, maximum) {
-  const range = maximum - minimum + 1;
-  const randomValue = new Uint32Array(1);
-  crypto.getRandomValues(randomValue);
-  return minimum + (randomValue[0] % range);
+  return minimum + Math.floor(Math.random() * (maximum - minimum + 1));
+}
+
+function sectionLabel(sectionKey) {
+  return ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label;
 }
 
 function sleep(milliseconds) {
@@ -195,7 +191,6 @@ async function prepareCaptureJob(request) {
     id: jobId,
     status: "ready",
     statusText: "Preparing full profile…",
-    mode: "full",
     settings,
     sourceTabId: sourceTab.id,
     sourceWindowId: sourceTab.windowId,
@@ -227,27 +222,16 @@ async function waitForTab(tabId, timeoutMs = 20000, description = "a detail page
 
 async function sendToProfileTab(tabId, message) {
   const tab = await chrome.tabs.get(tabId);
-  const targetUrl = new URL(tab.url || "about:blank");
-  if (targetUrl.protocol !== "https:" || !/(^|\.)linkedin\.com$/i.test(targetUrl.hostname)
-    || !/^\/in\/[^/]+(?:\/|$)/i.test(targetUrl.pathname)) {
+  if (!ProfileCopyConfig.isProfilePage(tab.url, true)) {
     throw new Error("The LinkedIn profile page is no longer open.");
   }
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (error) {
     if (!/receiving end does not exist|could not establish connection/i.test(error.message)) throw error;
-    await chrome.scripting.insertCSS({
-      target: { tabId },
-      files: ["src/content/profileOverlay.css"]
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [
-        "src/shared/config.js",
-        "src/shared/formatter.js",
-        "src/content/profileExtractor.js"
-      ]
-    });
+    const [{ css, js }] = chrome.runtime.getManifest().content_scripts;
+    await chrome.scripting.insertCSS({ target: { tabId }, files: css });
+    await chrome.scripting.executeScript({ target: { tabId }, files: js });
     return chrome.tabs.sendMessage(tabId, message);
   }
 }
@@ -268,10 +252,8 @@ function hasRequestedDetailSection(profile, settings) {
 }
 
 async function readBaseProfile(jobId, job) {
-  let response;
-
   for (let attempt = 0; attempt < MAX_BASE_PROFILE_READS; attempt += 1) {
-    response = await sendToProfileTab(job.sourceTabId, {
+    const response = await sendToProfileTab(job.sourceTabId, {
       type: "EXTRACT_BASE_PROFILE",
       settings: job.settings,
       loadLazySections: attempt === 0
@@ -296,15 +278,13 @@ async function readBaseProfile(jobId, job) {
     await pauseWithin(CAPTURE_DELAYS.beforeBaseRetry);
     await checkCapture(job);
   }
-
-  return response.profile;
 }
 
 async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, total) {
-  const definition = ProfileCopyConfig.sections.find(({ key }) => key === sectionKey);
+  const label = sectionLabel(sectionKey);
   await checkCapture(job);
   await patchJob(jobId, {
-    statusText: `Loading full ${definition.label.toLowerCase()}…`,
+    statusText: `Loading full ${label.toLowerCase()}…`,
     progress: { current: index + 1, total }
   });
 
@@ -331,7 +311,7 @@ async function collectDetailSection(jobId, job, sectionKey, detailUrl, index, to
     });
 
     if (!response?.ok) {
-      throw new Error(response?.error || `Could not read ${definition.label}.`);
+      throw new Error(response?.error || `Could not read ${label}.`);
     }
 
     return response;
@@ -376,7 +356,6 @@ async function collectProfile(jobId) {
     await checkCapture(job);
     const profile = await readBaseProfile(jobId, job);
     await checkCapture(job);
-    profile.mode = job.mode;
     const warnings = [];
     const fallbackSections = new Set();
 
@@ -401,14 +380,13 @@ async function collectProfile(jobId) {
           profile.sections[sectionKey] = detail.text;
         }
         if (detail.incomplete || !detail.text?.trim()) fallbackSections.add(sectionKey);
-        if (detail.incomplete) warnings.push(`${ProfileCopyConfig.sections.find(({ key }) => key === sectionKey).label} (loading limit reached)`);
+        if (detail.incomplete) warnings.push(`${sectionLabel(sectionKey)} (loading limit reached)`);
       } catch (error) {
         await checkCapture(job);
         const unread = error.stopDetails ? detailSections.slice(index) : [sectionKey];
         warnings.push(...unread.map((section) => {
           fallbackSections.add(section);
-          const label = ProfileCopyConfig.sections.find(({ key }) => key === section).label;
-          return `${label} (${error.message || "could not be read"})`;
+          return `${sectionLabel(section)} (${error.message || "could not be read"})`;
         }));
         if (error.stopDetails) break;
       }
@@ -508,3 +486,8 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
     clearTabJobs(tabId, change.status === "loading" ? null : change.url).catch(() => undefined);
   }
 });
+
+// A fresh worker runs nothing, so a saved running job was cut off when Chrome stopped the last worker.
+chrome.storage.session.get(null).then((stored) => Promise.all(Object.entries(stored)
+  .filter(([key, job]) => key.startsWith(JOB_PREFIX) && job?.status === "running" && !runningCaptures.has(job.id))
+  .map(([, job]) => clearCaptureJob(job.id)))).catch(() => undefined);
